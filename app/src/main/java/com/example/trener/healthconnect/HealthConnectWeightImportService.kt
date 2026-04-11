@@ -7,6 +7,7 @@ import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import com.example.trener.normalizeBodyWeightKg
 import com.example.trener.data.local.TrenerDatabase
 import com.example.trener.data.local.entity.BodyWeightEntryEntity
 import kotlinx.coroutines.Dispatchers
@@ -153,7 +154,7 @@ object HealthConnectWeightImportService {
                 val selectedRecord = dayRecords.maxWithOrNull(comparator) ?: return@mapNotNull null
                 BodyWeightEntryEntity(
                     entryDateEpochDay = epochDay,
-                    weightKg = selectedRecord.weight.inKilograms
+                    weightKg = normalizeBodyWeightKg(selectedRecord.weight.inKilograms)
                 )
             }
             .sortedBy { it.entryDateEpochDay }

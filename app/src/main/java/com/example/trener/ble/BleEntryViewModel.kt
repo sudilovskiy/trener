@@ -19,6 +19,8 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.trener.R
+import com.example.trener.formatBodyWeightKg
+import com.example.trener.normalizeBodyWeightKg
 import com.example.trener.logTag
 import com.example.trener.data.local.BodyWeightHistoryRepository
 import com.example.trener.data.local.TrenerDatabaseProvider
@@ -63,26 +65,15 @@ data class BleDeviceUiModel(
     val isPinned: Boolean = false
 )
 
-data class BleDebugPacketUiModel(
-    val timestampEpochMillis: Long,
-    val hexPayload: String,
-    val packetLength: Int,
-    val computedWeightKg: Float?,
-    val weightFieldHex: String? = null,
-    val decodedRawValue: Int? = null,
-    val decoderSummary: String? = null
-)
-
 data class BleEntryUiState(
     val status: BleEntryStatus = BleEntryStatus.Idle,
     val statusMessage: String = "",
     val detailMessage: String? = null,
     val devices: List<BleDeviceUiModel> = emptyList(),
     val selectedDeviceAddress: String? = null,
-    val measuredWeightKg: Float? = null,
+    val measuredWeightKg: Double? = null,
     val primaryDeviceAddress: String? = null,
-    val connectionMode: BleConnectionMode = BleConnectionMode.Primary,
-    val debugPackets: List<BleDebugPacketUiModel> = emptyList()
+    val connectionMode: BleConnectionMode = BleConnectionMode.Primary
 )
 
 class BleEntryViewModel(application: Application) : AndroidViewModel(application) {
@@ -108,7 +99,6 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
     private var deviceMaintenanceJob: Job? = null
     private var hasAnyMeasurementCandidate = false
     private var measurementSaved = false
-    private var lastStableWeightKg: Float? = null
     private var primaryDeviceAddress: String? = primaryDeviceStore.getPrimaryDeviceMac()
 
     private val _uiState = MutableStateFlow(BleEntryUiState())
@@ -163,7 +153,7 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
 
         stopScanInternal()
         shutdownGatt()
-        clearMeasurementState(clearDebugPackets = true)
+        clearMeasurementState()
         updateStatus(
             status = BleEntryStatus.Searching,
             message = appContext.getString(R.string.weight_ble_searching),
@@ -200,7 +190,7 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
 
         stopScanInternal()
         shutdownGatt()
-        clearMeasurementState(clearDebugPackets = true)
+        clearMeasurementState()
         emitDevices()
 
         runCatching {
@@ -264,7 +254,7 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
 
         stopScanInternal()
         shutdownGatt()
-        clearMeasurementState(clearDebugPackets = false)
+        clearMeasurementState()
 
         updateStatus(
             status = BleEntryStatus.Connecting,
@@ -365,7 +355,7 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
         message: String,
         detailMessage: String? = null,
         selectedDeviceAddress: String? = null,
-        measuredWeightKg: Float? = null,
+        measuredWeightKg: Double? = null,
         primaryDeviceAddress: String? = null,
         connectionMode: BleConnectionMode? = null
     ) {
@@ -444,17 +434,11 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
         Log.d(logTag, "Saved primary BLE device mac=$address")
     }
 
-    private fun clearMeasurementState(clearDebugPackets: Boolean) {
+    private fun clearMeasurementState() {
         cancelMeasurementJobs()
         hasAnyMeasurementCandidate = false
         measurementSaved = false
-        lastStableWeightKg = null
         discoveredTargets.clear()
-        if (clearDebugPackets) {
-            _uiState.update { current ->
-                current.copy(debugPackets = emptyList())
-            }
-        }
     }
 
     private fun startDeviceListMaintenance() {
@@ -539,8 +523,8 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
 
         updateStatus(
             status = BleEntryStatus.Receiving,
-            message = appContext.getString(R.string.weight_ble_receiving),
-            detailMessage = appContext.getString(R.string.weight_ble_receiving_detail),
+            message = appContext.getString(R.string.weight_ble_receiving_status),
+            detailMessage = null,
             selectedDeviceAddress = gatt.device.address
         )
         beginMeasurementTimeout()
@@ -637,14 +621,11 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
         }
 
         hasAnyMeasurementCandidate = true
-        val candidateWeight = parsed.weightKg
+        val candidateWeight = normalizeBodyWeightKg(parsed.weightKg)
         updateStatus(
             status = BleEntryStatus.Receiving,
-            message = appContext.getString(
-                R.string.weight_ble_weight_received,
-                BleWeightMeasurementParser.formatWeight(candidateWeight)
-            ),
-            detailMessage = appContext.getString(R.string.weight_ble_stabilizing),
+            message = appContext.getString(R.string.weight_ble_receiving_status),
+            detailMessage = null,
             measuredWeightKg = candidateWeight,
             selectedDeviceAddress = _uiState.value.selectedDeviceAddress
         )
@@ -660,58 +641,36 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
         payload: ByteArray,
         parsed: ParsedWeightMeasurement?
     ) {
-        val hexPayload = payload.toHexString()
-        val packet = BleDebugPacketUiModel(
-            timestampEpochMillis = System.currentTimeMillis(),
-            hexPayload = hexPayload,
-            packetLength = payload.size,
-            computedWeightKg = parsed?.weightKg,
-            weightFieldHex = parsed?.rawFieldHex,
-            decodedRawValue = parsed?.rawValue,
-            decoderSummary = parsed?.let {
-                "offset=${it.rawFieldOffset} len=${it.rawFieldLength} raw=${it.rawValue} /${it.divisor}"
-            }
-        )
         Log.d(
             logTag,
             buildString {
                 append("BLE packet ")
-                append("len=").append(packet.packetLength)
-                append(" hex=").append(packet.hexPayload)
-                append(" field=").append(packet.weightFieldHex ?: "null")
-                append(" raw=").append(packet.decodedRawValue?.toString() ?: "null")
+                append("len=").append(payload.size)
+                append(" hex=").append(payload.toHexString())
+                append(" field=").append(parsed?.rawFieldHex ?: "null")
+                append(" raw=").append(parsed?.rawValue?.toString() ?: "null")
                 append(" computedWeight=")
-                append(parsed?.weightKg?.let(BleWeightMeasurementParser::formatWeight) ?: "null")
+                append(parsed?.weightKg?.let(::formatBodyWeightKg) ?: "null")
             }
         )
-        _uiState.update { current ->
-            current.copy(
-                debugPackets = (current.debugPackets + packet).takeLast(MAX_DEBUG_PACKET_HISTORY)
-            )
-        }
     }
 
-    private suspend fun persistStableWeight(candidateWeight: Float) {
+    private suspend fun persistStableWeight(candidateWeight: Double) {
         if (measurementSaved) {
             return
         }
 
-        lastStableWeightKg = candidateWeight
-
         runCatching {
             withContext(Dispatchers.IO) {
-                bodyWeightRepository.saveWeightForToday(candidateWeight.toDouble())
+                bodyWeightRepository.saveWeightForToday(candidateWeight)
             }
         }.onSuccess {
             measurementSaved = true
             cancelMeasurementJobs()
             updateStatus(
                 status = BleEntryStatus.Saved,
-                message = appContext.getString(
-                    R.string.weight_ble_weight_received,
-                    BleWeightMeasurementParser.formatWeight(candidateWeight)
-                ),
-                detailMessage = appContext.getString(R.string.weight_ble_saved_detail),
+                message = appContext.getString(R.string.weight_ble_saved_status),
+                detailMessage = null,
                 measuredWeightKg = candidateWeight,
                 selectedDeviceAddress = _uiState.value.selectedDeviceAddress
             )
@@ -931,7 +890,6 @@ class BleEntryViewModel(application: Application) : AndroidViewModel(application
 
         private const val MEASUREMENT_TIMEOUT_MS = 15_000L
         private const val STABILIZE_WINDOW_MS = 900L
-        private const val MAX_DEBUG_PACKET_HISTORY = 25
         private const val DEVICE_LIST_REFRESH_INTERVAL_MS = 2_000L
         private const val DEVICE_STALE_TIMEOUT_MS = 12_000L
         private const val SCALE_MAC_PREFIX = "88:22:B2"

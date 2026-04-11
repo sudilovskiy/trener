@@ -1,5 +1,7 @@
 package com.example.trener.ble
 
+import com.example.trener.formatBodyWeightKg
+
 data class ParsedWeightMeasurement(
     val weightKg: Float,
     val confidence: Int,
@@ -36,7 +38,7 @@ object BleWeightMeasurementParser {
     }
 
     fun formatWeight(weightKg: Float): String {
-        return String.format(java.util.Locale.US, "%.1f", weightKg)
+        return formatBodyWeightKg(weightKg)
     }
 
     private fun readLittleEndianUInt(

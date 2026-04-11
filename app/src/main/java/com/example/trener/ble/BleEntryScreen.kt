@@ -13,10 +13,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -38,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -46,11 +45,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.trener.BuildConfig
+import com.example.trener.formatBodyWeightKg
 import com.example.trener.R
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +61,7 @@ fun BleEntryScreen(
     val requiredPermissions = remember { requiredBlePermissions() }
     var requestedInitialAction by remember { mutableStateOf(false) }
     var pendingBleAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var autoReturnScheduled by rememberSaveable { mutableStateOf(false) }
 
     val bluetoothEnableLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -134,6 +132,19 @@ fun BleEntryScreen(
         }
     }
 
+    LaunchedEffect(uiState.status, uiState.measuredWeightKg) {
+        if (uiState.status == BleEntryStatus.Saved && uiState.measuredWeightKg != null) {
+            if (autoReturnScheduled) {
+                return@LaunchedEffect
+            }
+            autoReturnScheduled = true
+            delay(1200)
+            onBack()
+        } else {
+            autoReturnScheduled = false
+        }
+    }
+
     DisposableEffect(viewModel) {
         onDispose {
             viewModel.close()
@@ -190,7 +201,9 @@ fun BleEntryScreen(
                     hasPrimaryDevice = hasPrimaryDevice,
                     canInteract = uiState.status != BleEntryStatus.Connecting &&
                         uiState.status != BleEntryStatus.Scanning &&
-                        uiState.status != BleEntryStatus.Searching,
+                        uiState.status != BleEntryStatus.Searching &&
+                        uiState.status != BleEntryStatus.Receiving &&
+                        uiState.status != BleEntryStatus.Saved,
                     onReconnect = {
                         ensureBleAccessAndThen {
                             viewModel.startMainFlow()
@@ -202,44 +215,6 @@ fun BleEntryScreen(
                         }
                     }
                 )
-            }
-
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = when {
-                            uiState.status == BleEntryStatus.PermissionRequired -> {
-                                stringResource(R.string.weight_ble_permission_required)
-                            }
-
-                            uiState.status == BleEntryStatus.BluetoothDisabled -> {
-                                stringResource(R.string.weight_ble_bluetooth_disabled)
-                            }
-
-                            uiState.status == BleEntryStatus.Connected -> {
-                                stringResource(R.string.weight_ble_connected)
-                            }
-
-                            else -> uiState.statusMessage
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    uiState.detailMessage?.let { detail ->
-                        Text(
-                            text = detail,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    uiState.primaryDeviceAddress?.let { address ->
-                        Text(
-                            text = stringResource(R.string.weight_ble_primary_device_label, address),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
             }
 
             if (isSelectionMode) {
@@ -283,13 +258,6 @@ fun BleEntryScreen(
                 }
             }
 
-            if (BuildConfig.DEBUG) {
-                item {
-                    BleDebugCard(
-                        packets = uiState.debugPackets
-                    )
-                }
-            }
         }
     }
 }
@@ -370,6 +338,7 @@ private fun BleActionRow(
 
 @Composable
 private fun BleStatusCard(uiState: BleEntryUiState) {
+    val isSuccessState = uiState.status == BleEntryStatus.Saved
     val containerColor = when (uiState.status) {
         BleEntryStatus.Searching -> MaterialTheme.colorScheme.tertiaryContainer
         BleEntryStatus.Connected -> MaterialTheme.colorScheme.primaryContainer
@@ -408,32 +377,33 @@ private fun BleStatusCard(uiState: BleEntryUiState) {
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(if (isSuccessState) 8.dp else 6.dp)
         ) {
             Text(
                 text = statusLabel(uiState.status),
                 style = MaterialTheme.typography.titleMedium,
                 color = contentColor
             )
-            Text(
-                text = uiState.statusMessage,
-                style = MaterialTheme.typography.bodyMedium,
-                color = contentColor
-            )
             uiState.measuredWeightKg?.let { weightKg ->
                 Text(
-                    text = "${BleWeightMeasurementParser.formatWeight(weightKg)} kg",
-                    style = MaterialTheme.typography.headlineSmall,
+                    text = "${formatBodyWeightKg(weightKg)} kg",
+                    style = MaterialTheme.typography.displaySmall,
                     color = contentColor
                 )
             }
-            uiState.selectedDeviceAddress?.let { address ->
-                Spacer(modifier = Modifier.height(2.dp))
+            if (!isSuccessState) {
                 Text(
-                    text = address,
-                    style = MaterialTheme.typography.labelMedium,
+                    text = uiState.statusMessage,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = contentColor
                 )
+                uiState.detailMessage?.let { detail ->
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor
+                    )
+                }
             }
         }
     }
@@ -495,80 +465,6 @@ private fun BleDeviceCard(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun BleDebugCard(
-    packets: List<BleDebugPacketUiModel>
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.weight_ble_debug_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = stringResource(R.string.weight_ble_debug_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (packets.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.weight_ble_debug_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                val timeFormatter = rememberTimeFormatter()
-                packets.takeLast(12).forEach { packet ->
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = timeFormatter.format(Date(packet.timestampEpochMillis)),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "len=${packet.packetLength} weight=${
-                                packet.computedWeightKg?.let(BleWeightMeasurementParser::formatWeight)
-                                    ?: "null"
-                            }",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "field=${packet.weightFieldHex ?: "null"} raw=${
-                                packet.decodedRawValue?.toString() ?: "null"
-                            } ${packet.decoderSummary ?: ""}".trim(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = packet.hexPayload,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun rememberTimeFormatter(): SimpleDateFormat {
-    return remember {
-        SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
     }
 }
 

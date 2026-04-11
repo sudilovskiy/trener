@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.toArgb
+import com.example.trener.normalizedWeight
 import com.example.trener.data.local.BodyWeightHistoryRepository
 import com.example.trener.data.local.TrenerDatabaseProvider
 import com.example.trener.data.local.entity.BodyWeightEntryEntity
@@ -186,7 +187,7 @@ fun OverviewScreen(
         }
 
         val sessions = loaded.first
-        weightHistory = loaded.second
+        weightHistory = loaded.second.map { it.normalizedWeight() }
         val todayEpochDay = LocalDate.now().toEpochDay()
         val windowStartEpochDay = todayEpochDay - 29
         workoutsByEpochDay = sessions.groupBy { session ->
@@ -218,7 +219,7 @@ fun OverviewScreen(
             bodyWeightRepository.getLastWeight()
         }
         if (!weightInputWasEdited) {
-            weightInput = lastWeight?.weightKg?.let(::formatWeightDisplayString).orEmpty()
+            weightInput = lastWeight?.weightKg?.let(::formatBodyWeightKg).orEmpty()
         }
         weightInputError = null
     }
@@ -824,7 +825,7 @@ fun OverviewScreen(
                 val entryDateText = entry?.entryDateEpochDay?.let(::safeLocalDateOfEpochDay)
                     ?.format(fullDateFormatter)
                     ?: safeLocalDateOfEpochDay(target.entryDateEpochDay).format(fullDateFormatter)
-                val weightText = entry?.weightKg?.let(::formatWeightDisplayString)
+                val weightText = entry?.weightKg?.let(::formatBodyWeightKg)
                     ?: stringResource(R.string.not_specified)
                 stringResource(
                     R.string.weight_management_delete_single_confirm_message,
@@ -1054,14 +1055,6 @@ private fun WeightManagementSheet(
             }
         }
 
-        item {
-            Text(
-                text = stringResource(R.string.weight_management_single_title),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
         if (records.isEmpty()) {
             item {
                 Text(
@@ -1070,14 +1063,6 @@ private fun WeightManagementSheet(
                 )
             }
         } else {
-            item {
-                Text(
-                    text = stringResource(R.string.weight_management_single_hint),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-
             items(records, key = { it.entryDateEpochDay }) { entry ->
                 val isSelected = entry.entryDateEpochDay == selectedEntryEpochDay
                 Card(
@@ -1092,9 +1077,12 @@ private fun WeightManagementSheet(
                         }
                     )
                 ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = safeLocalDateOfEpochDay(entry.entryDateEpochDay).format(dateFormatter),
@@ -1106,7 +1094,8 @@ private fun WeightManagementSheet(
                             }
                         )
                         Text(
-                            text = formatWeightDisplayString(entry.weightKg),
+                            text = "${formatBodyWeightKg(entry.weightKg)} kg",
+                            style = MaterialTheme.typography.titleSmall,
                             color = if (isSelected) {
                                 MaterialTheme.colorScheme.onPrimaryContainer
                             } else {
@@ -1126,22 +1115,6 @@ private fun WeightManagementSheet(
                     Text(stringResource(R.string.weight_management_delete_selected))
                 }
             }
-        }
-
-        item {
-            Text(
-                text = stringResource(R.string.weight_management_range_title),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        item {
-            Text(
-                text = stringResource(R.string.weight_management_range_hint),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium
-            )
         }
 
         item {
@@ -1507,15 +1480,6 @@ private fun openDatePicker(
 private fun safeLocalDateOfEpochDay(epochDay: Long): LocalDate {
     return runCatching { LocalDate.ofEpochDay(epochDay) }
         .getOrElse { LocalDate.now() }
-}
-
-private fun formatWeightDisplayString(weightKg: Double): String {
-    val integerValue = weightKg.toLong()
-    return if (integerValue.toDouble() == weightKg) {
-        integerValue.toString()
-    } else {
-        weightKg.toString()
-    }
 }
 
 private fun resolveWeightRange(

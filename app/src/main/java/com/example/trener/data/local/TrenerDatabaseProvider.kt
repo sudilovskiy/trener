@@ -50,6 +50,7 @@ object TrenerDatabaseProvider {
         )
             .addMigrations(MIGRATION_4_5)
             .addMigrations(MIGRATION_5_6)
+            .addMigrations(MIGRATION_6_7)
             .fallbackToDestructiveMigration()
             .build()
     }
@@ -87,5 +88,17 @@ private val MIGRATION_5_6 = object : Migration(5, 6) {
         )
         db.execSQL("DROP TABLE `body_weight_history`")
         db.execSQL("ALTER TABLE `body_weight_history_new` RENAME TO `body_weight_history`")
+    }
+}
+
+private val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            UPDATE `body_weight_history`
+            SET `weightKg` = ROUND(`weightKg`, 1)
+            WHERE `weightKg` != ROUND(`weightKg`, 1)
+            """.trimIndent()
+        )
     }
 }

@@ -1,5 +1,7 @@
 package com.example.trener.data.local
 
+import com.example.trener.normalizeBodyWeightKg
+import com.example.trener.normalizedWeight
 import com.example.trener.data.local.entity.BodyWeightEntryEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -12,13 +14,13 @@ class BodyWeightHistoryRepository(
 
     suspend fun getLastWeight(): BodyWeightEntryEntity? {
         return withContext(Dispatchers.IO) {
-            bodyWeightHistoryDao.getLastWeightEntry()
+            bodyWeightHistoryDao.getLastWeightEntry()?.normalizedWeight()
         }
     }
 
     suspend fun getWeightForDate(entryDateEpochDay: Long): BodyWeightEntryEntity? {
         return withContext(Dispatchers.IO) {
-            bodyWeightHistoryDao.getWeightEntryByDate(entryDateEpochDay)
+            bodyWeightHistoryDao.getWeightEntryByDate(entryDateEpochDay)?.normalizedWeight()
         }
     }
 
@@ -31,9 +33,10 @@ class BodyWeightHistoryRepository(
         weightKg: Double
     ): BodyWeightEntryEntity {
         return withContext(Dispatchers.IO) {
+            val normalizedWeightKg = normalizeBodyWeightKg(weightKg)
             val entry = BodyWeightEntryEntity(
                 entryDateEpochDay = entryDateEpochDay,
-                weightKg = weightKg
+                weightKg = normalizedWeightKg
             )
             val existingEntry = getWeightForDate(entryDateEpochDay)
 

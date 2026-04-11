@@ -15,7 +15,7 @@ import com.example.trener.data.local.entity.WorkoutSessionEntity
         WorkoutSessionEntity::class,
         WorkoutSessionSetEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class TrenerDatabase : RoomDatabase() {
