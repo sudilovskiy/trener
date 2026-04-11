@@ -49,6 +49,7 @@ object TrenerDatabaseProvider {
             DATABASE_NAME
         )
             .addMigrations(MIGRATION_4_5)
+            .addMigrations(MIGRATION_5_6)
             .fallbackToDestructiveMigration()
             .build()
     }
@@ -62,5 +63,29 @@ private val MIGRATION_4_5 = object : Migration(4, 5) {
             ADD COLUMN note TEXT NOT NULL DEFAULT ''
             """.trimIndent()
         )
+    }
+}
+
+private val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `body_weight_history_new` (
+                `entryDateEpochDay` INTEGER NOT NULL,
+                `weightKg` REAL NOT NULL,
+                PRIMARY KEY(`entryDateEpochDay`)
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            INSERT INTO `body_weight_history_new` (`entryDateEpochDay`, `weightKg`)
+            SELECT `entryDateEpochDay`, `weightKg`
+            FROM `body_weight_history`
+            ORDER BY `entryDateEpochDay` ASC
+            """.trimIndent()
+        )
+        db.execSQL("DROP TABLE `body_weight_history`")
+        db.execSQL("ALTER TABLE `body_weight_history_new` RENAME TO `body_weight_history`")
     }
 }

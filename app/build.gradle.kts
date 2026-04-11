@@ -38,6 +38,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {
@@ -53,10 +54,13 @@ android {
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    val healthConnectVersion = "1.0.0-alpha10"
     val roomVersion = "2.6.1"
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
     implementation("androidx.activity:activity-compose:1.9.1")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
@@ -64,10 +68,13 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("androidx.health.connect:connect-client:$healthConnectVersion")
     implementation("androidx.room:room-runtime:$roomVersion")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     ksp("androidx.room:room-compiler:$roomVersion")
 
     debugImplementation(composeBom)
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    testImplementation("junit:junit:4.13.2")
 }

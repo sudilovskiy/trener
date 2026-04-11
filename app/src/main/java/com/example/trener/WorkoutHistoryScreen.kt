@@ -121,7 +121,7 @@ fun WorkoutHistoryScreen(
                     is BackupDatabaseResult.Success -> {
                         Toast.makeText(
                             context,
-                            "Резервная копия создана",
+                            context.getString(R.string.history_backup_created),
                             Toast.LENGTH_SHORT
                         ).show()
                     }
@@ -194,7 +194,7 @@ fun WorkoutHistoryScreen(
             }
 
             item {
-                SectionCard(title = "Управление") {
+                SectionCard(title = stringResource(R.string.history_management_title)) {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -203,7 +203,7 @@ fun WorkoutHistoryScreen(
                             enabled = !isWorking,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Удалить все тренировки")
+                            Text(stringResource(R.string.history_delete_all_workouts))
                         }
                         Button(
                             onClick = {
@@ -214,7 +214,7 @@ fun WorkoutHistoryScreen(
                             enabled = !isWorking,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Создать резервную копию")
+                            Text(stringResource(R.string.history_backup_button))
                         }
                         Button(
                             onClick = {
@@ -225,7 +225,7 @@ fun WorkoutHistoryScreen(
                             enabled = !isWorking,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Восстановить из резервной копии")
+                            Text(stringResource(R.string.history_restore_button))
                         }
                     }
                 }
@@ -268,7 +268,7 @@ fun WorkoutHistoryScreen(
                     showDeleteAllConfirmation = false
                 }
             },
-            text = { Text("Удалить ВСЕ тренировки? Это действие нельзя отменить.") },
+            text = { Text(stringResource(R.string.history_delete_all_confirm)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -305,7 +305,7 @@ fun WorkoutHistoryScreen(
                         }
                     }
                 ) {
-                    Text("Да")
+                    Text(stringResource(R.string.exit_workout_dialog_confirm))
                 }
             },
             dismissButton = {
@@ -313,7 +313,7 @@ fun WorkoutHistoryScreen(
                     onClick = { showDeleteAllConfirmation = false },
                     enabled = !isWorking
                 ) {
-                    Text("Нет")
+                    Text(stringResource(R.string.exit_workout_dialog_cancel))
                 }
             }
         )
@@ -327,7 +327,7 @@ fun WorkoutHistoryScreen(
                     pendingRestoreUri = null
                 }
             },
-            text = { Text("Текущие данные будут удалены. Продолжить?") },
+            text = { Text(stringResource(R.string.history_restore_confirm)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -361,7 +361,7 @@ fun WorkoutHistoryScreen(
                                         onAdminDataChanged()
                                         Toast.makeText(
                                             context,
-                                            "Данные восстановлены",
+                                            context.getString(R.string.history_data_restored),
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
@@ -382,7 +382,7 @@ fun WorkoutHistoryScreen(
                         }
                     }
                 ) {
-                    Text("Да")
+                    Text(stringResource(R.string.exit_workout_dialog_confirm))
                 }
             },
             dismissButton = {
@@ -393,7 +393,7 @@ fun WorkoutHistoryScreen(
                     },
                     enabled = !isWorking
                 ) {
-                    Text("Нет")
+                    Text(stringResource(R.string.exit_workout_dialog_cancel))
                 }
             }
         )

@@ -16,9 +16,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,22 +32,30 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.trener.data.local.TrenerDatabaseProvider
+import com.example.trener.healthconnect.HealthConnectWeightImportService
+import com.example.trener.ble.BleEntryScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 
 @Composable
 fun TrenerApp() {
     val currentContext = LocalContext.current
     val context = currentContext.applicationContext
     val activity = currentContext as? Activity
+    val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
+    val coroutineScope = rememberCoroutineScope()
     val databaseRefreshToken by DatabaseRefreshCoordinator.refreshGeneration.collectAsState()
     var selectedTrainingDay by remember { mutableIntStateOf(1) }
     var lastCompletedTrainingDay by remember { mutableStateOf<Int?>(null) }
     var completedHistoryRefreshToken by remember { mutableIntStateOf(0) }
     var workoutDetailRefreshToken by remember { mutableIntStateOf(0) }
+    var healthConnectWeightImportInFlight by remember { mutableStateOf(false) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
     var shouldExitAfterWorkoutSave by rememberSaveable { mutableStateOf(false) }
     val sessionUiState = remember { WorkoutSessionUiState() }
@@ -57,9 +67,48 @@ fun TrenerApp() {
     val currentRoute = currentBackStackEntry?.destination?.route
     val shouldInterceptExit = currentRoute == AppRoute.Overview && sessionUiState.hasActiveWorkout()
 
+    fun requestHealthConnectWeightImport() {
+        if (currentRoute != AppRoute.Overview || healthConnectWeightImportInFlight) {
+            return
+        }
+
+        healthConnectWeightImportInFlight = true
+        coroutineScope.launch {
+            try {
+                val imported = withContext(Dispatchers.IO) {
+                    HealthConnectWeightImportService.syncLatestWeight(context, database)
+                }
+                if (imported) {
+                    DatabaseRefreshCoordinator.requestRefresh()
+                }
+            } finally {
+                healthConnectWeightImportInFlight = false
+            }
+        }
+    }
+
     LaunchedEffect(database, completedHistoryRefreshToken, databaseRefreshToken) {
         lastCompletedTrainingDay = withContext(Dispatchers.IO) {
             database.workoutSessionDao().getLastSession()?.trainingDay
+        }
+    }
+
+    LaunchedEffect(currentRoute) {
+        if (currentRoute == AppRoute.Overview) {
+            requestHealthConnectWeightImport()
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, currentRoute) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && currentRoute == AppRoute.Overview) {
+                requestHealthConnectWeightImport()
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -119,6 +168,9 @@ fun TrenerApp() {
                         },
                         databaseRefreshToken = databaseRefreshToken,
                         historyRefreshToken = completedHistoryRefreshToken,
+                        onBleEntryClick = {
+                            navController.navigate(AppRoute.BleEntry)
+                        },
                         onTrainingDayClick = { trainingDay ->
                             val activeWorkout = sessionUiState.activeWorkout
                             if (activeWorkout != null && activeWorkout.trainingDay != trainingDay) {
@@ -257,6 +309,13 @@ fun TrenerApp() {
                         }
                     )
                 }
+                composable(AppRoute.BleEntry) {
+                    BleEntryScreen(
+                        onBack = {
+                            navController.popBackStack()
+                        }
+                    )
+                }
             }
 
             if (showExitConfirmation) {
@@ -297,6 +356,7 @@ private object AppRoute {
     const val WorkoutDetail = "history/{$SessionIdArg}"
     const val WorkoutEdit = "history/{$SessionIdArg}/edit"
     const val Exercise = "exercise/{$ExerciseIdArg}"
+    const val BleEntry = "weight/ble-entry"
 
     fun workoutDetail(sessionId: Long): String = "history/$sessionId"
     fun historyForDate(epochDay: Long): String = "history/date/$epochDay"
