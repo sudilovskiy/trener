@@ -1,0 +1,16 @@
+.android/
+.android-sdk/
+.android-user-home/
+.gradle/
+.gradle-user/
+.gradle-user-home/
+.idea/
+.kotlin-daemon/
+.kotlin-home/
+.userhome/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+backup_current_version_*.zip

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Тренер</string>
+
+    <string name="training_day_title">День %1$d</string>
+
+    <string name="overview_title">Тренер</string>
+    <string name="overview_day_description">Открыть тренировку и список упражнений.</string>
+    <string name="overview_calendar_title">Календарь тренировок</string>
+    <string name="calendar_previous_month">Предыдущий месяц</string>
+    <string name="calendar_next_month">Следующий месяц</string>
+    <string name="history_screen_title">История тренировок</string>
+
+    <string name="workout_timer_label">Таймер: %1$s</string>
+    <string name="active_workout_already_exists">Уже есть активная тренировка</string>
+    <string name="workout_controls_title">Управление</string>
+    <string name="workout_start_button">Начать тренировку</string>
+    <string name="workout_starting_button">Запуск...</string>
+    <string name="workout_start_error">Не удалось начать тренировку.</string>
+    <string name="workout_finish_button">Завершить тренировку</string>
+    <string name="workout_saving_button">Сохранение...</string>
+    <string name="workout_saved_message">Тренировка сохранена.</string>
+    <string name="workout_save_error">Не удалось сохранить тренировку.</string>
+    <string name="workout_exercises_title">Упражнения</string>
+
+    <string name="exercise_sets_title">Подходы</string>
+    <string name="exercise_set_label">Подход %1$d</string>
+    <string name="exercise_time_seconds_label">Время (сек)</string>
+    <string name="exercise_note_label">&#x417;&#x430;&#x43C;&#x435;&#x442;&#x43A;&#x430;</string>
+    <string name="exercise_current_label">Текущий</string>
+    <string name="exercise_max_label">Максимум</string>
+    <string name="exercise_decrement_symbol">-</string>
+    <string name="exercise_increment_symbol">+</string>
+    <string name="exercise_complete_set_button">&#x417;&#x430;&#x432;&#x435;&#x440;&#x448;&#x438;&#x442;&#x44C;</string>
+    <string name="exercise_set_saving_button">Сохранение...</string>
+    <string name="exercise_set_completed_button">&#x412;&#x44B;&#x43F;&#x43E;&#x43B;&#x43D;&#x435;&#x43D;&#x43E;</string>
+    <string name="exercise_completed_label">Упражнение завершено</string>
+    <string name="exercise_completed_suffix"> *</string>
+    <string name="exercise_set_save_error">Не удалось сохранить подход.</string>
+    <string name="exercise_finish_all_sets_button">Завершить упражнение</string>
+    <string name="exercise_finish_all_sets_dialog_title">Завершить упражнение?</string>
+    <string name="exercise_finish_all_sets_dialog_message">Все оставшиеся незавершенные подходы будут отмечены как выполненные со значением 0.</string>
+    <string name="exercise_finish_all_sets_dialog_confirm">Завершить</string>
+    <string name="exercise_finish_all_sets_dialog_cancel">Отмена</string>
+
+    <string name="history_load_error">Не удалось загрузить историю тренировок.</string>
+    <string name="loading">Загрузка...</string>
+    <string name="history_empty">Пока нет сохраненных тренировок.</string>
+    <string name="history_day_label">День тренировки: %1$d</string>
+    <string name="history_exercises_label">Упражнения: %1$s</string>
+
+    <string name="workout_detail_title">Детали тренировки</string>
+    <string name="workout_detail_invalid_id">Некорректный идентификатор тренировки.</string>
+    <string name="workout_detail_not_found">Тренировка не найдена.</string>
+    <string name="workout_detail_load_error">Не удалось загрузить тренировку.</string>
+    <string name="workout_detail_edit_button">Редактировать</string>
+    <string name="workout_detail_delete_button">Удалить</string>
+    <string name="workout_detail_delete_dialog_title">Удалить тренировку?</string>
+    <string name="workout_detail_delete_dialog_message">Тренировка будет удалена вместе со всеми сохраненными подходами.</string>
+    <string name="workout_detail_delete_dialog_confirm">Удалить</string>
+    <string name="workout_detail_delete_dialog_cancel">Отмена</string>
+    <string name="workout_detail_delete_active_error">Нельзя удалить активную тренировку.</string>
+    <string name="workout_detail_delete_error">Не удалось удалить тренировку.</string>
+    <string name="date_label">Дата: %1$s</string>
+    <string name="duration_label">Длительность: %1$s</string>
+    <string name="not_specified">не указана</string>
+    <string name="sets_not_found">Подходы не найдены.</string>
+    <string name="set_number_label">Подход: %1$d</string>
+
+    <string name="set_value_reps">Повторения: %1$d</string>
+    <string name="set_value_weight">Вес: %1$s кг</string>
+    <string name="set_value_additional">Доп. значение: %1$s</string>
+    <string name="set_value_flag">Флаг: %1$s</string>
+    <string name="flag_yes">да</string>
+    <string name="flag_no">нет</string>
+    <string name="set_values_not_specified">Значения не указаны</string>
+
+    <string name="duration_hms">%1$d ч %2$02d мин %3$02d сек</string>
+    <string name="duration_ms">%1$d мин %2$02d сек</string>
+    <string name="duration_s">%1$d сек</string>
+
+    <string name="exercise_pull_ups_ui">Подтягивания</string>
+    <string name="exercise_ab_wheel_ui">Упражнения с роликом</string>
+    <string name="exercise_wide_push_ups_ui">Широкие отжимания</string>
+    <string name="exercise_dumbbell_flyes_ui">Разводка с гантелями</string>
+    <string name="exercise_spring_expander_ui">Экспандер пружинный</string>
+    <string name="exercise_reverse_grip_pull_ups_ui">Подтягивания обратным хватом</string>
+    <string name="exercise_dumbbell_biceps_ui">Гантели на бицепс</string>
+    <string name="exercise_bench_abs_ui">Пресс на скамье</string>
+    <string name="exercise_bench_back_extensions_ui">Спина на скамье</string>
+    <string name="exercise_push_ups_ui">Отжимания</string>
+    <string name="exercise_dips_ui">Брусья</string>
+    <string name="exercise_dumbbell_triceps_ui">Гантели на трицепс</string>
+    <string name="exercise_dips_abs_ui">Пресс на брусьях</string>
+    <string name="exercise_neck_ui">Шея</string>
+    <string name="exit_workout_dialog_title">У вас есть активная тренировка</string>
+    <string name="exit_workout_dialog_message">Завершить и выйти?</string>
+    <string name="exit_workout_dialog_confirm">Да</string>
+    <string name="exit_workout_dialog_cancel">Нет</string>
+</resources>

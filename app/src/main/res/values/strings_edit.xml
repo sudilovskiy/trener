@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="workout_detail_edit_active_error">Нельзя редактировать активную тренировку.</string>
+    <string name="workout_edit_title">Редактирование тренировки</string>
+    <string name="workout_edit_invalid_id">Некорректный идентификатор тренировки.</string>
+    <string name="workout_edit_not_found">Тренировка не найдена.</string>
+    <string name="workout_edit_load_error">Не удалось загрузить данные для редактирования.</string>
+    <string name="workout_edit_active_blocked">Активную тренировку нельзя редактировать отдельно от выполнения.</string>
+    <string name="workout_edit_metadata_title">Неизменяемые данные</string>
+    <string name="workout_edit_day_label">День: %1$d</string>
+    <string name="workout_edit_exercise_present">Упражнение включено</string>
+    <string name="workout_edit_exercise_absent">Упражнение исключено</string>
+    <string name="workout_edit_exercise_removed_hint">Упражнение будет удалено из этой тренировки.</string>
+    <string name="workout_edit_reps_label">Повторы</string>
+    <string name="workout_edit_add_exercise">Добавить</string>
+    <string name="workout_edit_remove_exercise">Удалить</string>
+    <string name="workout_edit_save_button">Сохранить</string>
+    <string name="workout_edit_saving_button">Сохранение...</string>
+    <string name="workout_edit_cancel_button">Отмена</string>
+    <string name="workout_edit_save_error">Не удалось сохранить изменения.</string>
+</resources>

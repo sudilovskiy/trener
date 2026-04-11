@@ -1,0 +1,948 @@
+package com.example.trener
+
+import android.widget.Toast
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import com.example.trener.data.local.TrenerDatabase
+import com.example.trener.data.local.TrenerDatabaseProvider
+import com.example.trener.data.local.entity.WorkoutSessionSetEntity
+import com.example.trener.domain.workout.PreparedWorkoutSessionSet
+import com.example.trener.domain.workout.loadPersistedMaxValuesBySetNumber
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ExerciseScreen(
+    exerciseId: String,
+    sessionUiState: WorkoutSessionUiState,
+    onFinished: () -> Unit
+) {
+    val context = LocalContext.current
+    val database = remember(context.applicationContext) {
+        TrenerDatabaseProvider.getInstance(context.applicationContext)
+    }
+    val coroutineScope = rememberCoroutineScope()
+    val setCount = sessionUiState.getRequiredSetCount(exerciseId)
+    val setLabels = List(setCount) { index ->
+        context.getString(R.string.exercise_set_label, index + 1)
+    }
+    val exerciseDefinition = remember(exerciseId) { getExerciseDefinition(exerciseId) }
+    val exerciseName = exerciseDefinition?.let { context.getString(it.labelResId) } ?: exerciseId
+    val exerciseInputType = exerciseDefinition?.inputType ?: ExerciseInputType.REPS
+    val setStates = sessionUiState.getExerciseSetUiStates(exerciseId, setCount)
+    val isPullUpsExercise = exerciseId == "pull_ups_ui"
+    val areAllVisibleSetsCompleted = setStates.isNotEmpty() && setStates.all(ExerciseSetUiState::isCompleted)
+    val isEditingEnabled = sessionUiState.isExerciseInActiveWorkout(exerciseId) && !sessionUiState.isSaving
+    val focusManager = LocalFocusManager.current
+
+    var savingSetNumber by remember(exerciseId) { mutableStateOf<Int?>(null) }
+    var isFinishingAllSets by remember(exerciseId) { mutableStateOf(false) }
+    var showFinishExerciseConfirmation by rememberSaveable(exerciseId) { mutableStateOf(false) }
+    var historyLoaded by rememberSaveable(exerciseId) { mutableStateOf(false) }
+    var maxValuesBySetNumber by remember(exerciseId, exerciseInputType) {
+        mutableStateOf<Map<Int, Int>>(emptyMap())
+    }
+
+    LaunchedEffect(exerciseId, exerciseInputType, isEditingEnabled, historyLoaded, setCount) {
+        if (historyLoaded || !isEditingEnabled) return@LaunchedEffect
+
+        val previousSets = withContext(Dispatchers.IO) {
+            List(setCount) { index ->
+                database.workoutSessionSetDao().getLatestSetForExerciseAndNumber(
+                    exerciseId = exerciseId,
+                    setNumber = index + 1
+                )?.let { previousSet ->
+                    PreparedWorkoutSessionSet(
+                        exerciseId = exerciseId,
+                        setNumber = index + 1,
+                        reps = previousSet.reps,
+                        weight = previousSet.weight,
+                        additionalValue = previousSet.additionalValue,
+                        flag = previousSet.flag,
+                        note = previousSet.note
+                    )
+                } ?: PreparedWorkoutSessionSet(
+                    exerciseId = exerciseId,
+                    setNumber = index + 1
+                )
+            }
+        }
+        sessionUiState.prefillExerciseSetsIfEmpty(
+            exerciseId = exerciseId,
+            sets = previousSets
+        )
+
+        historyLoaded = true
+    }
+
+    LaunchedEffect(exerciseId, exerciseInputType) {
+        maxValuesBySetNumber = withContext(Dispatchers.IO) {
+            loadPersistedMaxValuesBySetNumber(
+                database = database,
+                exerciseId = exerciseId,
+                exerciseInputType = exerciseInputType
+            )
+        }
+    }
+
+    Scaffold(
+        topBar = { TopAppBar(title = { Text(exerciseName) }) }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (isPullUpsExercise && areAllVisibleSetsCompleted) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 36.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = stringResource(R.string.exercise_completed_label),
+                            maxLines = 1,
+                            softWrap = false,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            } else {
+                Button(
+                    onClick = { showFinishExerciseConfirmation = true },
+                    enabled = isEditingEnabled && savingSetNumber == null && !isFinishingAllSets,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 36.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 16.dp,
+                        vertical = 4.dp
+                    )
+                ) {
+                    Text(
+                        text = stringResource(R.string.exercise_finish_all_sets_button),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        setLabels.forEachIndexed { index, setLabel ->
+                            val setUiState = setStates[index]
+                            val setState = setUiState.set
+                            val isSetEditable = isEditingEnabled && !setUiState.isLocked
+
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(SetCardHeight)
+                                    .semantics { testTag = "exercise-set-${setState.setNumber}" },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (setUiState.isCompleted) {
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    } else {
+                                        MaterialTheme.colorScheme.surface
+                                    }
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                                        .alpha(if (setUiState.isCompleted) CompletedSetAlpha else 1f),
+                                    verticalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    val maxValue = maxValuesBySetNumber[setState.setNumber] ?: 0
+
+                                    ExerciseSetHeader(
+                                        setLabel = setLabel,
+                                        maxValue = maxValue.toString(),
+                                        actionButton = {
+                                            if (setUiState.isCompleted) {
+                                                if (isPullUpsExercise && isEditingEnabled) {
+                                                    OutlinedButton(
+                                                        onClick = {},
+                                                        enabled = true,
+                                                        modifier = Modifier
+                                                            .height(SetActionButtonHeight)
+                                                            .pointerInput(setState.setNumber) {
+                                                                detectTapGestures(
+                                                                    onLongPress = {
+                                                                        focusManager.clearFocus(force = true)
+                                                                        sessionUiState.reactivateSet(
+                                                                            exerciseId = exerciseId,
+                                                                            setNumber = setState.setNumber
+                                                                        )
+                                                                    }
+                                                                )
+                                                            },
+                                                        colors = ButtonDefaults.outlinedButtonColors(
+                                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        ),
+                                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                                            horizontal = 10.dp,
+                                                            vertical = 0.dp
+                                                        )
+                                                    ) {
+                                                        Text(
+                                                            text = stringResource(R.string.exercise_set_completed_button),
+                                                            maxLines = 1,
+                                                            softWrap = false,
+                                                            style = MaterialTheme.typography.labelMedium
+                                                        )
+                                                    }
+                                                } else {
+                                                    OutlinedButton(
+                                                        onClick = {},
+                                                        enabled = false,
+                                                        modifier = Modifier.height(SetActionButtonHeight),
+                                                        colors = ButtonDefaults.outlinedButtonColors(
+                                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        ),
+                                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                                            horizontal = 10.dp,
+                                                            vertical = 0.dp
+                                                        )
+                                                    ) {
+                                                        Text(
+                                                            text = stringResource(R.string.exercise_set_completed_button),
+                                                            maxLines = 1,
+                                                            softWrap = false,
+                                                            style = MaterialTheme.typography.labelMedium
+                                                        )
+                                                    }
+                                                }
+                                            } else {
+                                                val completeButtonEnabled = isEditingEnabled &&
+                                                    !setUiState.isCompleted &&
+                                                    savingSetNumber == null &&
+                                                    !isFinishingAllSets
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        val activeWorkout = sessionUiState.activeWorkout
+                                                            ?: return@OutlinedButton
+                                                        val setToPersist = setState
+                                                        savingSetNumber = setState.setNumber
+                                                        coroutineScope.launch {
+                                                            runCatching {
+                                                                withContext(Dispatchers.IO) {
+                                                                    persistExerciseSet(
+                                                                        database = database,
+                                                                        workoutSessionId = activeWorkout.sessionId,
+                                                                        set = setToPersist,
+                                                                        replaceExisting = true
+                                                                    )
+                                                                }
+                                                            }.onSuccess {
+                                                                val savedValue = when (exerciseInputType) {
+                                                                    ExerciseInputType.REPS -> setToPersist.reps ?: 0
+                                                                    ExerciseInputType.TIME_SECONDS ->
+                                                                        setToPersist.additionalValue?.toInt() ?: 0
+                                                                }
+                                                                maxValuesBySetNumber = maxValuesBySetNumber
+                                                                    .toMutableMap()
+                                                                    .apply {
+                                                                        val currentMax = get(setState.setNumber) ?: 0
+                                                                        if (savedValue > currentMax) {
+                                                                            put(setState.setNumber, savedValue)
+                                                                        }
+                                                                    }
+                                                                val completionResult = sessionUiState.completeSet(
+                                                                    exerciseId = exerciseId,
+                                                                    setNumber = setState.setNumber
+                                                                )
+                                                                focusManager.clearFocus(force = true)
+                                                                if (completionResult?.isExerciseCompleted == true && !isPullUpsExercise) {
+                                                                    onFinished()
+                                                                }
+                                                            }.onFailure {
+                                                                Toast.makeText(
+                                                                    context,
+                                                                    context.getString(
+                                                                        R.string.exercise_set_save_error
+                                                                    ),
+                                                                    Toast.LENGTH_SHORT
+                                                                ).show()
+                                                            }
+                                                            savingSetNumber = null
+                                                        }
+                                                    },
+                                                    enabled = completeButtonEnabled,
+                                                    modifier = Modifier.height(SetActionButtonHeight),
+                                                    colors = ButtonDefaults.outlinedButtonColors(
+                                                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    ),
+                                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                                        horizontal = 10.dp,
+                                                        vertical = 0.dp
+                                                    )
+                                                ) {
+                                                    Text(
+                                                        text = if (savingSetNumber == setState.setNumber) {
+                                                            stringResource(R.string.exercise_set_saving_button)
+                                                        } else {
+                                                            stringResource(R.string.exercise_complete_set_button)
+                                                        },
+                                                        maxLines = 1,
+                                                        softWrap = false,
+                                                        style = MaterialTheme.typography.labelMedium
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    )
+                                    ExerciseSetDraftRow(
+                                        note = setState.note,
+                                        currentValue = when (exerciseInputType) {
+                                            ExerciseInputType.TIME_SECONDS -> setState.additionalValue.toDisplayString()
+                                            ExerciseInputType.REPS -> setState.reps.toDisplayString()
+                                        },
+                                        onNoteChange = { updatedNote ->
+                                            updateSetStates(
+                                                currentStates = setStates.map(ExerciseSetUiState::set),
+                                                index = index,
+                                                exerciseId = exerciseId,
+                                                sessionUiState = sessionUiState
+                                            ) { updated ->
+                                                updated.copy(note = updatedNote)
+                                            }
+                                        },
+                                        onCurrentValueChange = { updatedValue ->
+                                            when (exerciseInputType) {
+                                                ExerciseInputType.TIME_SECONDS -> {
+                                                    updateSetStates(
+                                                        currentStates = setStates.map(ExerciseSetUiState::set),
+                                                        index = index,
+                                                        exerciseId = exerciseId,
+                                                        sessionUiState = sessionUiState
+                                                    ) { updated ->
+                                                        updated.copy(
+                                                            additionalValue = updatedValue.toIntOrNull()?.toDouble()
+                                                        )
+                                                    }
+                                                }
+
+                                                ExerciseInputType.REPS -> {
+                                                    updateSetStates(
+                                                        currentStates = setStates.map(ExerciseSetUiState::set),
+                                                        index = index,
+                                                        exerciseId = exerciseId,
+                                                        sessionUiState = sessionUiState
+                                                    ) { updated ->
+                                                        updated.copy(reps = updatedValue.toIntOrNull())
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onDecrement = {
+                                            when (exerciseInputType) {
+                                                ExerciseInputType.TIME_SECONDS -> {
+                                                    updateSetStates(
+                                                        currentStates = setStates.map(ExerciseSetUiState::set),
+                                                        index = index,
+                                                        exerciseId = exerciseId,
+                                                        sessionUiState = sessionUiState
+                                                    ) { updated ->
+                                                        updated.copy(
+                                                            additionalValue = decrementDoubleValue(updated.additionalValue)
+                                                        )
+                                                    }
+                                                }
+
+                                                ExerciseInputType.REPS -> {
+                                                    updateSetStates(
+                                                        currentStates = setStates.map(ExerciseSetUiState::set),
+                                                        index = index,
+                                                        exerciseId = exerciseId,
+                                                        sessionUiState = sessionUiState
+                                                    ) { updated ->
+                                                        updated.copy(reps = decrementIntValue(updated.reps))
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onIncrement = {
+                                            when (exerciseInputType) {
+                                                ExerciseInputType.TIME_SECONDS -> {
+                                                    updateSetStates(
+                                                        currentStates = setStates.map(ExerciseSetUiState::set),
+                                                        index = index,
+                                                        exerciseId = exerciseId,
+                                                        sessionUiState = sessionUiState
+                                                    ) { updated ->
+                                                        updated.copy(
+                                                            additionalValue = incrementDoubleValue(updated.additionalValue)
+                                                        )
+                                                    }
+                                                }
+
+                                                ExerciseInputType.REPS -> {
+                                                    updateSetStates(
+                                                        currentStates = setStates.map(ExerciseSetUiState::set),
+                                                        index = index,
+                                                        exerciseId = exerciseId,
+                                                        sessionUiState = sessionUiState
+                                                    ) { updated ->
+                                                        updated.copy(reps = incrementIntValue(updated.reps))
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        enabled = isSetEditable,
+                                        isReadOnly = !isSetEditable
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (showFinishExerciseConfirmation) {
+                AlertDialog(
+                    onDismissRequest = { showFinishExerciseConfirmation = false },
+                    title = { Text(text = stringResource(R.string.exercise_finish_all_sets_dialog_title)) },
+                    text = { Text(text = stringResource(R.string.exercise_finish_all_sets_dialog_message)) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                val activeWorkout = sessionUiState.activeWorkout ?: return@TextButton
+                                val setsToPersist = setStates.map { currentSetUiState ->
+                                    if (currentSetUiState.isCompleted || currentSetUiState.set.hasEnteredValues()) {
+                                        currentSetUiState.set
+                                    } else {
+                                        currentSetUiState.set.zeroedFor(exerciseInputType)
+                                    }
+                                }
+                                showFinishExerciseConfirmation = false
+                                isFinishingAllSets = true
+                                focusManager.clearFocus(force = true)
+                                coroutineScope.launch {
+                                    runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            setsToPersist.forEach { setToPersist ->
+                                                persistExerciseSet(
+                                                    database = database,
+                                                    workoutSessionId = activeWorkout.sessionId,
+                                                    set = setToPersist,
+                                                    replaceExisting = true
+                                                )
+                                            }
+                                        }
+                                    }.onSuccess {
+                                        sessionUiState.updateExerciseSets(
+                                            exerciseId = exerciseId,
+                                            sets = setsToPersist,
+                                            allowCompletedOverride = true
+                                        )
+                                        setStates.forEach { currentSetUiState ->
+                                            if (currentSetUiState.isCompleted) return@forEach
+                                            sessionUiState.completeSet(
+                                                exerciseId = exerciseId,
+                                                setNumber = currentSetUiState.set.setNumber
+                                            )
+                                        }
+                                        if (!isPullUpsExercise) {
+                                            onFinished()
+                                        }
+                                    }.onFailure {
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.exercise_set_save_error),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                    isFinishingAllSets = false
+                                }
+                            }
+                        ) {
+                            Text(text = stringResource(R.string.exercise_finish_all_sets_dialog_confirm))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showFinishExerciseConfirmation = false }) {
+                            Text(text = stringResource(R.string.exercise_finish_all_sets_dialog_cancel))
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExerciseSetDraftRow(
+    note: String,
+    currentValue: String,
+    onNoteChange: (String) -> Unit,
+    onCurrentValueChange: (String) -> Unit,
+    onDecrement: () -> Unit,
+    onIncrement: () -> Unit,
+    enabled: Boolean,
+    isReadOnly: Boolean
+) {
+    val focusManager = LocalFocusManager.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(SetBottomRowHeight),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CompactNoteField(
+            value = note,
+            onValueChange = onNoteChange,
+            modifier = Modifier
+                .weight(1f)
+                .height(CompactFieldHeight),
+            enabled = enabled,
+            isReadOnly = isReadOnly,
+            placeholder = stringResource(R.string.exercise_note_label),
+            onDone = { focusManager.clearFocus(force = true) }
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Row(
+            modifier = Modifier.width(SetCurrentValueAreaWidth),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CompactStepperButton(
+                symbol = stringResource(R.string.exercise_decrement_symbol),
+                enabled = enabled,
+                onClick = onDecrement
+            )
+            CompactNumberField(
+                value = currentValue,
+                onValueChange = { updatedValue ->
+                    if (updatedValue.all(Char::isDigit)) {
+                        onCurrentValueChange(updatedValue)
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(CompactFieldHeight),
+                enabled = enabled,
+                isReadOnly = isReadOnly,
+                onDone = { focusManager.clearFocus(force = true) }
+            )
+            CompactStepperButton(
+                symbol = stringResource(R.string.exercise_increment_symbol),
+                enabled = enabled,
+                onClick = onIncrement
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExerciseSetHeader(
+    setLabel: String,
+    maxValue: String,
+    actionButton: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(SetHeaderHeight),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = setLabel,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            actionButton()
+            Text(
+                text = "${stringResource(R.string.exercise_max_label)}: $maxValue",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactNoteField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean,
+    isReadOnly: Boolean,
+    placeholder: String,
+    onDone: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val textColor = if (enabled || isReadOnly) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        enabled = true,
+        readOnly = isReadOnly,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodySmall.copy(color = textColor),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Text,
+            imeAction = ImeAction.Done
+        ),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        interactionSource = interactionSource,
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        decorationBox = { innerTextField ->
+            CompactFieldContainer(
+                enabled = enabled,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (!isFocused && value.isNotEmpty()) {
+                        Text(
+                            text = value,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = textColor,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else if (value.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .alpha(if (isFocused || value.isEmpty()) 1f else 0f),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        innerTextField()
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun CompactNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean,
+    isReadOnly: Boolean,
+    onDone: () -> Unit
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        enabled = true,
+        readOnly = isReadOnly,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodySmall.copy(
+            color = if (enabled || isReadOnly) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        ),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Done
+        ),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        decorationBox = { innerTextField ->
+            CompactFieldContainer(
+                enabled = enabled,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    innerTextField()
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun CompactFieldContainer(
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        modifier = modifier,
+        tonalElevation = 0.dp,
+        shape = MaterialTheme.shapes.medium,
+        color = if (enabled) {
+            MaterialTheme.colorScheme.surface
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outline
+        )
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun CompactStepperButton(
+    symbol: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.size(SetStepperButtonSize),
+        tonalElevation = 0.dp,
+        shape = MaterialTheme.shapes.medium,
+        color = if (enabled) {
+            MaterialTheme.colorScheme.surfaceVariant
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outline
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = symbol,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+    }
+}
+
+private fun updateSetStates(
+    currentStates: List<PreparedWorkoutSessionSet>,
+    index: Int,
+    exerciseId: String,
+    sessionUiState: WorkoutSessionUiState,
+    allowCompletedOverride: Boolean = false,
+    transform: (PreparedWorkoutSessionSet) -> PreparedWorkoutSessionSet
+): List<PreparedWorkoutSessionSet> {
+    val updatedStates = currentStates.toMutableList().also { states ->
+        states[index] = transform(states[index])
+    }
+    sessionUiState.updateExerciseSets(exerciseId, updatedStates, allowCompletedOverride)
+    return updatedStates
+}
+
+private fun persistExerciseSet(
+    database: TrenerDatabase,
+    workoutSessionId: Long,
+    set: PreparedWorkoutSessionSet,
+    replaceExisting: Boolean
+) {
+    if (replaceExisting) {
+        val updatedRows = updatePersistedExerciseSet(database, workoutSessionId, set)
+        if (updatedRows > 0) return
+    }
+
+    database.workoutSessionSetDao().insertWorkoutSessionSet(
+        WorkoutSessionSetEntity(
+            workoutSessionId = workoutSessionId,
+            exerciseId = set.exerciseId,
+            setNumber = set.setNumber,
+            reps = set.reps,
+            weight = set.weight,
+            additionalValue = set.additionalValue,
+            flag = set.flag,
+            note = set.note
+        )
+    )
+}
+
+private fun updatePersistedExerciseSet(
+    database: TrenerDatabase,
+    workoutSessionId: Long,
+    set: PreparedWorkoutSessionSet
+): Int {
+    val statement = database.openHelper.writableDatabase.compileStatement(
+        """
+        UPDATE workout_session_sets
+        SET reps = ?, weight = ?, additionalValue = ?, flag = ?, note = ?
+        WHERE workoutSessionId = ? AND exerciseId = ? AND setNumber = ?
+        """.trimIndent()
+    )
+
+    if (set.reps != null) statement.bindLong(1, set.reps.toLong()) else statement.bindNull(1)
+    if (set.weight != null) statement.bindDouble(2, set.weight) else statement.bindNull(2)
+    if (set.additionalValue != null) statement.bindDouble(3, set.additionalValue) else statement.bindNull(3)
+    when (set.flag) {
+        true -> statement.bindLong(4, 1)
+        false -> statement.bindLong(4, 0)
+        null -> statement.bindNull(4)
+    }
+    statement.bindString(5, set.note)
+    statement.bindLong(6, workoutSessionId)
+    statement.bindString(7, set.exerciseId)
+    statement.bindLong(8, set.setNumber.toLong())
+    return statement.executeUpdateDelete()
+}
+
+private fun Int?.toDisplayString(): String = this?.toString() ?: ""
+
+private fun Double?.toDisplayString(): String = this?.toInt()?.toString() ?: ""
+
+private fun incrementIntValue(value: Int?): Int = (value ?: 0) + 1
+
+private fun decrementIntValue(value: Int?): Int = ((value ?: 0) - 1).coerceAtLeast(0)
+
+private fun incrementDoubleValue(value: Double?): Double = ((value?.toInt() ?: 0) + 1).toDouble()
+
+private fun decrementDoubleValue(value: Double?): Double = ((value?.toInt() ?: 0) - 1).coerceAtLeast(0).toDouble()
+
+private fun PreparedWorkoutSessionSet.zeroedFor(exerciseInputType: ExerciseInputType): PreparedWorkoutSessionSet {
+    return when (exerciseInputType) {
+        ExerciseInputType.REPS -> copy(reps = 0)
+        ExerciseInputType.TIME_SECONDS -> copy(additionalValue = 0.0)
+    }
+}
+
+private const val CompletedSetAlpha = 0.6f
+private val SetCardHeight = 84.dp
+private val SetHeaderHeight = 30.dp
+private val SetBottomRowHeight = 32.dp
+private val SetActionButtonHeight = 30.dp
+private val CompactFieldHeight = 32.dp
+private val SetStepperButtonSize = 26.dp
+private val SetCurrentValueAreaWidth = 112.dp
