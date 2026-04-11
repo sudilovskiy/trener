@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.mandatorySystemGesturesPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -914,83 +916,100 @@ private fun WeightRangeSheet(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .verticalScroll(rememberScrollState()),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            text = stringResource(R.string.weight_range_title),
-            style = MaterialTheme.typography.titleLarge
-        )
-        Text(
-            text = stringResource(R.string.weight_range_selected, selectedRangeLabel),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            RangePresetButton(
-                label = stringResource(R.string.weight_range_7_days),
-                selected = selectedMode == WeightRangeMode.SevenDays,
-                modifier = Modifier.weight(1f),
-                onClick = { onPresetSelected(WeightRangeMode.SevenDays) }
+            Text(
+                text = stringResource(R.string.weight_range_title),
+                style = MaterialTheme.typography.titleLarge
             )
-            RangePresetButton(
-                label = stringResource(R.string.weight_range_30_days),
-                selected = selectedMode == WeightRangeMode.ThirtyDays,
-                modifier = Modifier.weight(1f),
-                onClick = { onPresetSelected(WeightRangeMode.ThirtyDays) }
+            Text(
+                text = stringResource(R.string.weight_range_selected, selectedRangeLabel),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium
             )
-            RangePresetButton(
-                label = stringResource(R.string.weight_range_all),
-                selected = selectedMode == WeightRangeMode.All,
-                modifier = Modifier.weight(1f),
-                onClick = { onPresetSelected(WeightRangeMode.All) }
-            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RangePresetButton(
+                    label = stringResource(R.string.weight_range_7_days),
+                    selected = selectedMode == WeightRangeMode.SevenDays,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onPresetSelected(WeightRangeMode.SevenDays) }
+                )
+                RangePresetButton(
+                    label = stringResource(R.string.weight_range_30_days),
+                    selected = selectedMode == WeightRangeMode.ThirtyDays,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onPresetSelected(WeightRangeMode.ThirtyDays) }
+                )
+                RangePresetButton(
+                    label = stringResource(R.string.weight_range_all),
+                    selected = selectedMode == WeightRangeMode.All,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onPresetSelected(WeightRangeMode.All) }
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.weight_range_custom_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = onStartDateClick,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.weight_range_from,
+                            safeLocalDateOfEpochDay(startEpochDay).format(dateFormatter)
+                        )
+                    )
+                }
+                OutlinedButton(
+                    onClick = onEndDateClick,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.weight_range_to,
+                            safeLocalDateOfEpochDay(endEpochDay).format(dateFormatter)
+                        )
+                    )
+                }
+                if (hasInvalidManualRange) {
+                    Text(
+                        text = stringResource(R.string.weight_range_invalid_note),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = stringResource(R.string.weight_range_custom_title),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            OutlinedButton(
-                onClick = onStartDateClick,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = stringResource(
-                        R.string.weight_range_from,
-                        safeLocalDateOfEpochDay(startEpochDay).format(dateFormatter)
-                    )
-                )
-            }
-            OutlinedButton(
-                onClick = onEndDateClick,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = stringResource(
-                        R.string.weight_range_to,
-                        safeLocalDateOfEpochDay(endEpochDay).format(dateFormatter)
-                    )
-                )
-            }
-            if (hasInvalidManualRange) {
-                Text(
-                    text = stringResource(R.string.weight_range_invalid_note),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
-        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
+        )
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .mandatorySystemGesturesPadding()
+                .padding(top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedButton(
