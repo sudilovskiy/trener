@@ -171,6 +171,9 @@ fun TrenerApp() {
                         onBleEntryClick = {
                             navController.navigate(AppRoute.BleEntry)
                         },
+                        onExerciseComparisonClick = {
+                            navController.navigate(AppRoute.ExerciseComparison)
+                        },
                         onTrainingDayClick = { trainingDay ->
                             val activeWorkout = sessionUiState.activeWorkout
                             if (activeWorkout != null && activeWorkout.trainingDay != trainingDay) {
@@ -311,6 +314,15 @@ fun TrenerApp() {
                         }
                     )
                 }
+                composable(AppRoute.ExerciseComparison) {
+                    ExerciseComparisonScreen(
+                        databaseRefreshToken = databaseRefreshToken,
+                        historyRefreshToken = completedHistoryRefreshToken,
+                        onBack = {
+                            navController.popBackStack()
+                        }
+                    )
+                }
                 composable(AppRoute.BleEntry) {
                     BleEntryScreen(
                         onBack = {
@@ -358,6 +370,7 @@ private object AppRoute {
     const val WorkoutDetail = "history/{$SessionIdArg}"
     const val WorkoutEdit = "history/{$SessionIdArg}/edit"
     const val Exercise = "exercise/{$ExerciseIdArg}"
+    const val ExerciseComparison = "exercise/comparison"
     const val BleEntry = "weight/ble-entry"
 
     fun workoutDetail(sessionId: Long): String = "history/$sessionId"

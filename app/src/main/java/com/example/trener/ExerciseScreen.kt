@@ -618,74 +618,27 @@ fun ExerciseScreen(
                     val chartModifier = Modifier
                         .fillMaxWidth()
                         .height(160.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.25f),
-                            shape = MaterialTheme.shapes.large
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            shape = MaterialTheme.shapes.large
-                        )
-                        .padding(8.dp)
-                        .pointerInput(
-                            exerciseProgressEntries,
-                            exerciseProgressChartWidthPx,
-                            exerciseProgressRangeStartEpochDay,
-                            exerciseProgressRangeEndEpochDay
-                        ) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                if (exerciseProgressEntries.isEmpty() || exerciseProgressChartWidthPx <= 0) {
-                                    return@detectTransformGestures
-                                }
 
-                                val currentRange = visibleExerciseProgressRange
-                                val domainStart = exerciseProgressEntries.first().entryDateEpochDay
-                                val domainEnd = exerciseProgressEntries.last().entryDateEpochDay
-                                val domainLength = (domainEnd - domainStart + 1).coerceAtLeast(1L)
-                                val currentLength = currentRange.dayCount
-                                val safeZoom = zoom.coerceIn(0.5f, 2.0f)
-                                val zoomedLength = (currentLength / safeZoom)
-                                    .roundToLong()
-                                    .coerceIn(1L, domainLength)
-                                val panDays = ((-pan.x / exerciseProgressChartWidthPx.toFloat()) * currentLength)
-                                    .roundToLong()
-                                val centerEpochDay = currentRange.startEpochDay + (currentLength - 1) / 2.0
-                                val shiftedCenter = centerEpochDay + panDays
-                                val newStart = (shiftedCenter - (zoomedLength - 1) / 2.0).roundToLong()
-                                val newEnd = newStart + zoomedLength - 1
-                                val resolved = fitExerciseProgressRangeToDomain(
-                                    startEpochDay = newStart,
-                                    endEpochDay = newEnd,
-                                    domainStartEpochDay = domainStart,
-                                    domainEndEpochDay = domainEnd
-                                )
-
+                    ExerciseProgressChartPanel(
+                        entries = visibleExerciseProgressEntries,
+                        range = visibleExerciseProgressRange,
+                        modifier = chartModifier,
+                        onSizeChanged = { exerciseProgressChartWidthPx = it.width },
+                        onGesture = { pan, zoom ->
+                            val resolved = resolveExerciseProgressGestureRange(
+                                currentRange = visibleExerciseProgressRange,
+                                records = exerciseProgressEntries,
+                                chartWidthPx = exerciseProgressChartWidthPx,
+                                panX = pan.x,
+                                zoom = zoom
+                            )
+                            if (resolved != null) {
                                 exerciseProgressRangeMode = ExerciseProgressRangeMode.Custom
                                 exerciseProgressRangeStartEpochDay = resolved.startEpochDay
                                 exerciseProgressRangeEndEpochDay = resolved.endEpochDay
                             }
                         }
-
-                    if (visibleExerciseProgressEntries.isEmpty()) {
-                        Box(
-                            modifier = chartModifier,
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = stringResource(R.string.exercise_progress_empty),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
-                        ExerciseProgressChart(
-                            entries = visibleExerciseProgressEntries,
-                            range = visibleExerciseProgressRange,
-                            modifier = chartModifier,
-                            onSizeChanged = { exerciseProgressChartWidthPx = it.width }
-                        )
-                    }
+                    )
                 }
             }
 
@@ -1184,6 +1137,8 @@ private fun PreparedWorkoutSessionSet.zeroedFor(exerciseInputType: ExerciseInput
         ExerciseInputType.TIME_SECONDS -> copy(additionalValue = 0.0)
     }
 }
+
+/*
 
 private suspend fun loadExerciseProgressEntries(
     database: TrenerDatabase,
@@ -1840,6 +1795,8 @@ private fun formatExerciseAxisDateLabel(epochDay: Long, range: ExerciseProgressR
 private fun formatExerciseProgressDate(epochDay: Long): String {
     return safeLocalDateOfEpochDay(epochDay).format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
 }
+
+*/
 
 private const val CompletedSetAlpha = 0.6f
 private val SetCardHeight = 84.dp

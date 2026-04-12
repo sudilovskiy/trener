@@ -118,6 +118,7 @@ fun OverviewScreen(
     databaseRefreshToken: Int,
     historyRefreshToken: Int,
     onBleEntryClick: () -> Unit,
+    onExerciseComparisonClick: () -> Unit,
     onTrainingDayClick: (Int) -> Unit,
     onHistoryClick: () -> Unit,
     onHistoryDateClick: (Long) -> Unit
@@ -328,7 +329,12 @@ fun OverviewScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.overview_title)) }
+                title = { Text(stringResource(R.string.overview_title)) },
+                actions = {
+                    TextButton(onClick = onExerciseComparisonClick) {
+                        Text(stringResource(R.string.exercise_comparison_open_button))
+                    }
+                }
             )
         }
     ) { innerPadding ->

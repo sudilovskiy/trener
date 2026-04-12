@@ -5,6 +5,13 @@
     <string name="training_day_title">День %1$d</string>
 
     <string name="overview_title">Тренер</string>
+    <string name="exercise_comparison_open_button">Сравнение</string>
+    <string name="exercise_comparison_title">Сравнение упражнений</string>
+    <string name="exercise_comparison_back">Назад</string>
+    <string name="exercise_comparison_selector_a">A: %1$s</string>
+    <string name="exercise_comparison_selector_b">B: %1$s</string>
+    <string name="exercise_comparison_selector_a_sheet_title">Выбор упражнения A</string>
+    <string name="exercise_comparison_selector_b_sheet_title">Выбор упражнения B</string>
     <string name="overview_day_description">Открыть тренировку и список упражнений.</string>
     <string name="overview_calendar_title">Календарь тренировок</string>
     <string name="calendar_previous_month">Предыдущий месяц</string>
