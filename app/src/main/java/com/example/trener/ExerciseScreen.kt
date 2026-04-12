@@ -44,12 +44,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -124,53 +123,33 @@ fun ExerciseScreen(
     val exerciseName = exerciseDefinition?.let { context.getString(it.labelResId) } ?: exerciseId
     val exerciseInputType = exerciseDefinition?.inputType ?: ExerciseInputType.REPS
     val setStates = sessionUiState.getExerciseSetUiStates(exerciseId, setCount)
+    val currentExerciseTotalReps by remember(setStates) {
+        derivedStateOf {
+            setStates.sumOf { setUiState -> setUiState.set.reps ?: 0 }
+        }
+    }
     val isPullUpsExercise = exerciseId == "pull_ups_ui"
     val areAllVisibleSetsCompleted = setStates.isNotEmpty() && setStates.all(ExerciseSetUiState::isCompleted)
     val isEditingEnabled = sessionUiState.isExerciseInActiveWorkout(exerciseId) && !sessionUiState.isSaving
     val focusManager = LocalFocusManager.current
-    val exerciseRangeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var savingSetNumber by remember(exerciseId) { mutableStateOf<Int?>(null) }
     var isFinishingAllSets by remember(exerciseId) { mutableStateOf(false) }
     var showFinishExerciseConfirmation by rememberSaveable(exerciseId) { mutableStateOf(false) }
     var historyLoaded by rememberSaveable(exerciseId) { mutableStateOf(false) }
-    var exerciseProgressEntries by remember { mutableStateOf<List<ExerciseProgressPoint>>(emptyList()) }
-    var exerciseProgressRangeMode by rememberSaveable(exerciseId) {
-        mutableStateOf(ExerciseProgressRangeMode.All)
+    var previousExerciseTotalReps by remember(exerciseId) { mutableIntStateOf(0) }
+    var exerciseProgressEntries by remember(exerciseId) {
+        mutableStateOf<List<ExerciseProgressPoint>>(emptyList())
     }
-    var exerciseProgressRangeStartEpochDay by rememberSaveable(exerciseId) {
-        mutableLongStateOf(LocalDate.now().minusDays(6).toEpochDay())
-    }
-    var exerciseProgressRangeEndEpochDay by rememberSaveable(exerciseId) {
-        mutableLongStateOf(LocalDate.now().toEpochDay())
-    }
-    var showExerciseRangeSheet by remember { mutableStateOf(false) }
-    var exerciseProgressDraftMode by rememberSaveable(exerciseId) {
-        mutableStateOf(ExerciseProgressRangeMode.All)
-    }
-    var exerciseProgressDraftStartEpochDay by rememberSaveable(exerciseId) {
-        mutableLongStateOf(LocalDate.now().minusDays(6).toEpochDay())
-    }
-    var exerciseProgressDraftEndEpochDay by rememberSaveable(exerciseId) {
-        mutableLongStateOf(LocalDate.now().toEpochDay())
-    }
-    var exerciseProgressChartWidthPx by remember { mutableIntStateOf(0) }
-    var maxValuesBySetNumber by remember(exerciseId, exerciseInputType) {
-        mutableStateOf<Map<Int, Int>>(emptyMap())
-    }
-
-    val visibleExerciseProgressRange = remember(
-        exerciseProgressRangeStartEpochDay,
-        exerciseProgressRangeEndEpochDay
-    ) {
-        ExerciseProgressRange(
-            startEpochDay = exerciseProgressRangeStartEpochDay,
-            endEpochDay = exerciseProgressRangeEndEpochDay
+    var exerciseProgressRange by remember(exerciseId) {
+        mutableStateOf(
+            ExerciseProgressRange(
+                startEpochDay = LocalDate.now().minusDays(6).toEpochDay(),
+                endEpochDay = LocalDate.now().toEpochDay()
+            )
         )
     }
-    val visibleExerciseProgressEntries = remember(exerciseProgressEntries, visibleExerciseProgressRange) {
-        exerciseProgressEntries.filter { point ->
-            point.entryDateEpochDay in visibleExerciseProgressRange.startEpochDay..visibleExerciseProgressRange.endEpochDay
-        }
+    var maxValuesBySetNumber by remember(exerciseId, exerciseInputType) {
+        mutableStateOf<Map<Int, Int>>(emptyMap())
     }
 
     LaunchedEffect(exerciseId, exerciseInputType, isEditingEnabled, historyLoaded, setCount) {
@@ -216,26 +195,83 @@ fun ExerciseScreen(
     }
 
     LaunchedEffect(exerciseId, databaseRefreshToken, historyRefreshToken) {
-        exerciseProgressEntries = withContext(Dispatchers.IO) {
+        val loadedPreviousExerciseTotalReps = withContext(Dispatchers.IO) {
+            loadLatestExerciseSessionRepsTotal(
+                database = database,
+                exerciseId = exerciseId
+            )
+        }
+        previousExerciseTotalReps = loadedPreviousExerciseTotalReps
+
+        val loadedExerciseProgressEntries = withContext(Dispatchers.IO) {
             loadExerciseProgressEntries(
                 database = database,
                 exerciseId = exerciseId
             )
         }
-    }
-
-    LaunchedEffect(exerciseProgressEntries, exerciseProgressRangeMode) {
-        val resolvedRange = resolveExerciseProgressRange(
-            records = exerciseProgressEntries,
-            mode = exerciseProgressRangeMode,
-            currentRange = visibleExerciseProgressRange
+        exerciseProgressEntries = loadedExerciseProgressEntries
+        exerciseProgressRange = resolveExerciseProgressRange(
+            records = loadedExerciseProgressEntries,
+            mode = ExerciseProgressRangeMode.All,
+            currentRange = exerciseProgressRange
         )
-        exerciseProgressRangeStartEpochDay = resolvedRange.startEpochDay
-        exerciseProgressRangeEndEpochDay = resolvedRange.endEpochDay
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text(exerciseName) }) }
+        topBar = { TopAppBar(title = { Text(exerciseName) }) },
+        bottomBar = {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                tonalElevation = 2.dp
+            ) {
+                if (isPullUpsExercise && areAllVisibleSetsCompleted) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .heightIn(min = 36.dp),
+                        shape = MaterialTheme.shapes.extraLarge,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = stringResource(R.string.exercise_completed_label),
+                                maxLines = 1,
+                                softWrap = false,
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = { showFinishExerciseConfirmation = true },
+                        enabled = isEditingEnabled && savingSetNumber == null && !isFinishingAllSets,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .heightIn(min = 36.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 16.dp,
+                            vertical = 4.dp
+                        )
+                    ) {
+                        Text(
+                            text = stringResource(R.string.exercise_finish_all_sets_button),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+        }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -245,47 +281,27 @@ fun ExerciseScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (isPullUpsExercise && areAllVisibleSetsCompleted) {
-                Surface(
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.exercise_progress_title),
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 36.dp),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Text(
-                            text = stringResource(R.string.exercise_completed_label),
-                            maxLines = 1,
-                            softWrap = false,
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                }
-            } else {
-                Button(
-                    onClick = { showFinishExerciseConfirmation = true },
-                    enabled = isEditingEnabled && savingSetNumber == null && !isFinishingAllSets,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 36.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 16.dp,
-                        vertical = 4.dp
-                    )
-                ) {
-                    Text(
-                        text = stringResource(R.string.exercise_finish_all_sets_button),
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
+                        .weight(1f)
+                        .alignByBaseline(),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "$currentExerciseTotalReps/$previousExerciseTotalReps",
+                    modifier = Modifier.alignByBaseline(),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
 
             Card(
@@ -583,107 +599,33 @@ fun ExerciseScreen(
                 }
             }
 
-            SectionCard(title = stringResource(R.string.exercise_progress_title)) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                exerciseProgressDraftMode = exerciseProgressRangeMode
-                                exerciseProgressDraftStartEpochDay = exerciseProgressRangeStartEpochDay
-                                exerciseProgressDraftEndEpochDay = exerciseProgressRangeEndEpochDay
-                                showExerciseRangeSheet = true
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 44.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                        ) {
-                            Text(
-                                text = stringResource(
-                                    R.string.exercise_progress_range_label,
-                                    exerciseProgressRangeMode.displayLabel(context)
-                                ),
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center,
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        }
-                    }
-
-                    val chartModifier = Modifier
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier
                         .fillMaxWidth()
-                        .height(160.dp)
-
-                    ExerciseProgressChartPanel(
-                        entries = visibleExerciseProgressEntries,
-                        range = visibleExerciseProgressRange,
-                        modifier = chartModifier,
-                        onSizeChanged = { exerciseProgressChartWidthPx = it.width },
-                        onGesture = { pan, zoom ->
-                            val resolved = resolveExerciseProgressGestureRange(
-                                currentRange = visibleExerciseProgressRange,
-                                records = exerciseProgressEntries,
-                                chartWidthPx = exerciseProgressChartWidthPx,
-                                panX = pan.x,
-                                zoom = zoom
-                            )
-                            if (resolved != null) {
-                                exerciseProgressRangeMode = ExerciseProgressRangeMode.Custom
-                                exerciseProgressRangeStartEpochDay = resolved.startEpochDay
-                                exerciseProgressRangeEndEpochDay = resolved.endEpochDay
-                            }
-                        }
-                    )
-                }
-            }
-
-            if (showExerciseRangeSheet) {
-                ModalBottomSheet(
-                    onDismissRequest = { showExerciseRangeSheet = false },
-                    sheetState = exerciseRangeSheetState
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ExerciseProgressRangeSheet(
-                        context = context,
-                        selectedMode = exerciseProgressDraftMode,
-                        startEpochDay = exerciseProgressDraftStartEpochDay,
-                        endEpochDay = exerciseProgressDraftEndEpochDay,
-                        onPresetSelected = { preset ->
-                            exerciseProgressDraftMode = preset
-                        },
-                        onStartDatePicked = { epochDay ->
-                            exerciseProgressDraftStartEpochDay = epochDay
-                        },
-                        onEndDatePicked = { epochDay ->
-                            exerciseProgressDraftEndEpochDay = epochDay
-                        },
-                        onApply = {
-                            val resolvedRange = when (exerciseProgressDraftMode) {
-                                ExerciseProgressRangeMode.SevenDays,
-                                ExerciseProgressRangeMode.ThirtyDays,
-                                ExerciseProgressRangeMode.All -> resolveExerciseProgressRange(
-                                    records = exerciseProgressEntries,
-                                    mode = exerciseProgressDraftMode,
-                                    currentRange = visibleExerciseProgressRange
-                                )
-
-                                ExerciseProgressRangeMode.Custom -> resolveClampedExerciseProgressRange(
-                                    startEpochDay = exerciseProgressDraftStartEpochDay,
-                                    endEpochDay = exerciseProgressDraftEndEpochDay,
-                                    records = exerciseProgressEntries
-                                )
-                            }
-
-                            exerciseProgressRangeMode = exerciseProgressDraftMode
-                            exerciseProgressRangeStartEpochDay = resolvedRange.startEpochDay
-                            exerciseProgressRangeEndEpochDay = resolvedRange.endEpochDay
-                            showExerciseRangeSheet = false
-                        },
-                        onDismiss = { showExerciseRangeSheet = false }
+                    Text(
+                        text = stringResource(R.string.exercise_progress_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    ExerciseProgressChartPanel(
+                        entries = exerciseProgressEntries,
+                        range = exerciseProgressRange,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                        onSizeChanged = { _: androidx.compose.ui.unit.IntSize -> }
                     )
                 }
             }
@@ -1089,6 +1031,15 @@ private fun persistExerciseSet(
             note = set.note
         )
     )
+}
+
+private suspend fun loadLatestExerciseSessionRepsTotal(
+    database: TrenerDatabase,
+    exerciseId: String
+): Int {
+    return database.workoutSessionSetDao()
+        .getLatestSetsForExercise(exerciseId)
+        .sumOf { set -> set.reps ?: 0 }
 }
 
 private fun updatePersistedExerciseSet(
