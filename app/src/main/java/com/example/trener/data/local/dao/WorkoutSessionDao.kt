@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.example.trener.data.local.entity.WorkoutSessionEntity
+import com.example.trener.data.local.dao.ExerciseProgressSessionRow
 
 @Dao
 interface WorkoutSessionDao {
@@ -37,6 +38,23 @@ interface WorkoutSessionDao {
         """
     )
     fun getAllSessions(): List<WorkoutSessionEntity>
+
+    @Query(
+        """
+        SELECT
+            ws.id AS sessionId,
+            ws.startTimestampEpochMillis AS startTimestampEpochMillis,
+            ws.endTimestampEpochMillis AS endTimestampEpochMillis,
+            wss.reps AS setReps
+        FROM workout_sessions AS ws
+        INNER JOIN workout_session_sets AS wss
+            ON wss.workoutSessionId = ws.id
+        WHERE ws.endTimestampEpochMillis IS NOT NULL
+          AND wss.exerciseId = :exerciseId
+        ORDER BY ws.endTimestampEpochMillis DESC, ws.id DESC, wss.setNumber ASC, wss.id ASC
+        """
+    )
+    fun getExerciseProgressRows(exerciseId: String): List<ExerciseProgressSessionRow>
 
     @Query(
         """

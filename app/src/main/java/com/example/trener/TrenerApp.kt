@@ -303,6 +303,8 @@ fun TrenerApp() {
                         exerciseId = backStackEntry.arguments
                             ?.getString(AppRoute.ExerciseIdArg)
                             .orEmpty(),
+                        databaseRefreshToken = databaseRefreshToken,
+                        historyRefreshToken = completedHistoryRefreshToken,
                         sessionUiState = sessionUiState,
                         onFinished = {
                             navController.popBackStack()

@@ -9,6 +9,11 @@
     <string name="overview_calendar_title">Календарь тренировок</string>
     <string name="calendar_previous_month">Предыдущий месяц</string>
     <string name="calendar_next_month">Следующий месяц</string>
+    <string name="calendar_month_year_picker_title">Выбор месяца и года</string>
+    <string name="calendar_month_year_picker_cancel">Отмена</string>
+    <string name="calendar_month_year_picker_apply">Применить</string>
+    <string name="calendar_month_year_picker_previous_year">Предыдущий год</string>
+    <string name="calendar_month_year_picker_next_year">Следующий год</string>
     <string name="history_screen_title">История тренировок</string>
 
     <string name="workout_timer_label">Таймер: %1$s</string>
@@ -42,6 +47,19 @@
     <string name="exercise_finish_all_sets_dialog_message">Все оставшиеся незавершенные подходы будут отмечены как выполненные со значением 0.</string>
     <string name="exercise_finish_all_sets_dialog_confirm">Завершить</string>
     <string name="exercise_finish_all_sets_dialog_cancel">Отмена</string>
+    <string name="exercise_progress_title">Прогресс упражнения</string>
+    <string name="exercise_progress_empty">Пока нет завершенных тренировок для графика.</string>
+    <string name="exercise_progress_range_label">Диапазон: %1$s</string>
+    <string name="exercise_progress_range_title">Диапазон прогресса</string>
+    <string name="exercise_progress_range_7_days">7 дней</string>
+    <string name="exercise_progress_range_30_days">30 дней</string>
+    <string name="exercise_progress_range_all">Все</string>
+    <string name="exercise_progress_range_custom">Свой диапазон</string>
+    <string name="exercise_progress_range_from">Дата от: %1$s</string>
+    <string name="exercise_progress_range_to">Дата до: %1$s</string>
+    <string name="exercise_progress_range_invalid_note">Если даты перепутаны, диапазон будет исправлен при применении.</string>
+    <string name="exercise_progress_range_cancel">Отмена</string>
+    <string name="exercise_progress_range_apply">Применить</string>
 
     <string name="history_load_error">Не удалось загрузить историю тренировок.</string>
     <string name="loading">Загрузка...</string>
@@ -100,8 +118,8 @@
 
     <string name="weight_add_button">Добавить вес</string>
     <string name="weight_manage_button">Управление весом</string>
-    <string name="weight_ble_button">Получить данные через BLE</string>
-    <string name="weight_ble_placeholder_title">Получить данные через BLE</string>
+    <string name="weight_ble_button">Весы MI</string>
+    <string name="weight_ble_placeholder_title">Весы MI</string>
     <string name="weight_ble_placeholder_message">Здесь появится BLE-подключение и импорт веса в следующем шаге.</string>
     <string name="weight_ble_placeholder_confirm">ОК</string>
     <string name="weight_ble_screen_title">BLE подключение</string>

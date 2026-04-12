@@ -5,6 +5,7 @@ import android.graphics.Paint
 import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -78,9 +80,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.Month
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
+import java.time.temporal.ChronoUnit
 import java.time.temporal.WeekFields
 import java.util.Locale
 import kotlin.math.abs
@@ -144,6 +148,9 @@ fun OverviewScreen(
     var weightChartWidthPx by remember { mutableIntStateOf(0) }
     var showAddWeightDialog by remember { mutableStateOf(false) }
     var showWeightManagementSheet by remember { mutableStateOf(false) }
+    var showMonthYearPicker by remember { mutableStateOf(false) }
+    var monthYearPickerYear by rememberSaveable { mutableIntStateOf(YearMonth.now().year) }
+    var monthYearPickerMonth by rememberSaveable { mutableIntStateOf(YearMonth.now().monthValue) }
     var weightInput by rememberSaveable { mutableStateOf("") }
     var weightInputError by rememberSaveable { mutableStateOf<String?>(null) }
     var weightInputWasEdited by rememberSaveable { mutableStateOf(false) }
@@ -341,14 +348,19 @@ fun OverviewScreen(
                     val isActiveWorkoutButton = activeTrainingDay == trainingDay
                     val isHighlightedNextTrainingDay = highlightedTrainingDay == trainingDay
                     val buttonContainerColor = when {
-                        isActiveWorkoutButton -> MaterialTheme.colorScheme.primaryContainer
-                        isHighlightedNextTrainingDay -> MaterialTheme.colorScheme.secondaryContainer
+                        isActiveWorkoutButton -> ActiveDayContainerColor
+                        isHighlightedNextTrainingDay -> RecommendedDayContainerColor
                         else -> MaterialTheme.colorScheme.surfaceVariant
                     }
                     val buttonContentColor = when {
-                        isActiveWorkoutButton -> MaterialTheme.colorScheme.onPrimaryContainer
-                        isHighlightedNextTrainingDay -> MaterialTheme.colorScheme.onSecondaryContainer
+                        isActiveWorkoutButton -> ActiveDayContentColor
+                        isHighlightedNextTrainingDay -> RecommendedDayContentColor
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    val buttonBorder = when {
+                        isActiveWorkoutButton -> BorderStroke(1.5.dp, ActiveDayBorderColor)
+                        isHighlightedNextTrainingDay -> BorderStroke(1.5.dp, RecommendedDayBorderColor)
+                        else -> null
                     }
 
                     Button(
@@ -357,6 +369,7 @@ fun OverviewScreen(
                             .weight(1f)
                             .heightIn(min = 40.dp),
                         shape = RoundedCornerShape(14.dp),
+                        border = buttonBorder,
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = buttonContainerColor,
@@ -411,10 +424,19 @@ fun OverviewScreen(
                         ) {
                             Text("‹")
                         }
-                        Text(
-                            text = visibleMonth.atDay(1).format(monthFormatter),
-                            style = MaterialTheme.typography.titleSmall
-                        )
+                        TextButton(
+                            onClick = {
+                                monthYearPickerYear = visibleMonth.year
+                                monthYearPickerMonth = visibleMonth.monthValue
+                                showMonthYearPicker = true
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                text = visibleMonth.atDay(1).format(monthFormatter),
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                        }
                         TextButton(
                             onClick = { visibleMonthOffset += 1 },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
@@ -454,6 +476,8 @@ fun OverviewScreen(
                                             .height(32.dp),
                                         date = day,
                                         workoutSessions = workoutSessions,
+                                        highlightedTrainingDay = highlightedTrainingDay,
+                                        activeTrainingDay = activeTrainingDay,
                                         onClick = day?.takeIf { workoutSessions.isNotEmpty() }?.let {
                                             { onHistoryDateClick(it.toEpochDay()) }
                                         }
@@ -728,8 +752,32 @@ fun OverviewScreen(
                 },
                 onDismiss = { showWeightManagementSheet = false }
             )
-                }
-            }
+        }
+    }
+
+    if (showMonthYearPicker) {
+        ModalBottomSheet(
+            onDismissRequest = { showMonthYearPicker = false }
+        ) {
+            MonthYearPickerSheet(
+                year = monthYearPickerYear,
+                selectedMonth = monthYearPickerMonth,
+                locale = Locale.getDefault(),
+                onPreviousYear = { monthYearPickerYear -= 1 },
+                onNextYear = { monthYearPickerYear += 1 },
+                onMonthSelected = { selectedMonth ->
+                    monthYearPickerMonth = selectedMonth
+                    val selectedMonthYear = YearMonth.of(monthYearPickerYear, selectedMonth)
+                    visibleMonthOffset = ChronoUnit.MONTHS.between(
+                        YearMonth.now(),
+                        selectedMonthYear
+                    ).toInt()
+                    showMonthYearPicker = false
+                },
+                onDismiss = { showMonthYearPicker = false }
+            )
+        }
+    }
 
     if (showAddWeightDialog) {
         AlertDialog(
@@ -996,7 +1044,6 @@ private fun WeightRangeSheet(
                 }
             }
         }
-
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1187,20 +1234,118 @@ private fun WeightManagementSheet(
 }
 
 @Composable
+private fun MonthYearPickerSheet(
+    year: Int,
+    selectedMonth: Int,
+    locale: Locale,
+    onPreviousYear: () -> Unit,
+    onNextYear: () -> Unit,
+    onMonthSelected: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = stringResource(R.string.calendar_month_year_picker_title),
+            style = MaterialTheme.typography.titleMedium
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onPreviousYear) {
+                Text(stringResource(R.string.calendar_month_year_picker_previous_year))
+            }
+            Text(
+                text = year.toString(),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center
+            )
+            TextButton(onClick = onNextYear) {
+                Text(stringResource(R.string.calendar_month_year_picker_next_year))
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Month.values().asList().chunked(3).forEach { monthRow ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    monthRow.forEach { month ->
+                        val isSelected = month.value == selectedMonth
+                        if (isSelected) {
+                            Button(
+                                onClick = { onMonthSelected(month.value) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text(
+                                    text = month.getDisplayName(TextStyle.SHORT_STANDALONE, locale),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { onMonthSelected(month.value) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text(
+                                    text = month.getDisplayName(TextStyle.SHORT_STANDALONE, locale),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.calendar_month_year_picker_cancel))
+        }
+    }
+}
+
+@Composable
 private fun CalendarDayCell(
     modifier: Modifier,
     date: LocalDate?,
     workoutSessions: List<WorkoutSessionEntity>,
+    highlightedTrainingDay: Int?,
+    activeTrainingDay: Int?,
     onClick: (() -> Unit)?
 ) {
     val workoutCount = workoutSessions.size
     val hasWorkouts = date != null && workoutCount > 0
+    val isActiveTrainingDay = date != null && activeTrainingDay != null &&
+        workoutSessions.any { it.trainingDay == activeTrainingDay }
+    val isRecommendedTrainingDay = date != null && highlightedTrainingDay != null &&
+        workoutSessions.any { it.trainingDay == highlightedTrainingDay }
     val containerColor = when {
+        isActiveTrainingDay -> ActiveDayContainerColor
+        isRecommendedTrainingDay -> RecommendedDayContainerColor
         hasWorkouts -> MaterialTheme.colorScheme.primaryContainer
         date == null -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.20f)
         else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f)
     }
     val contentColor = when {
+        isActiveTrainingDay -> ActiveDayContentColor
+        isRecommendedTrainingDay -> RecommendedDayContentColor
         hasWorkouts -> MaterialTheme.colorScheme.onPrimaryContainer
         date == null -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -1745,3 +1890,11 @@ private fun formatWeightAxisDateLabel(epochDay: Long, range: WeightChartRange): 
         date.format(DateTimeFormatter.ofPattern("MMM yy", Locale.getDefault()))
     }
 }
+
+private val RecommendedDayContainerColor = Color(0xFFDDF4D8)
+private val RecommendedDayContentColor = Color(0xFF2E7D32)
+private val RecommendedDayBorderColor = Color(0xFF4E9A55)
+
+private val ActiveDayContainerColor = Color(0xFFFEDAD5)
+private val ActiveDayContentColor = Color(0xFFB42318)
+private val ActiveDayBorderColor = Color(0xFFD14343)
