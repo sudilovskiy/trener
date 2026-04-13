@@ -26,7 +26,12 @@ Android workout tracking app with progress analytics and BLE weight integration.
 
 ## Screenshots
 
-<!-- Добавь сюда 2–4 скриншота позже -->
+<p align="center">
+  <img src="screenshots/screen_main.png" width="250"/>
+  <img src="screenshots/screen_workout.png" width="250"/>
+  <img src="screenshots/screen_history.png" width="250"/>
+  <img src="screenshots/screen_weight.png" width="250"/>
+</p>
 
 ---
 
