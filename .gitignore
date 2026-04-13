@@ -13,6 +13,7 @@
 build/
 app/build/
 app/release/
+!!!/
 local.properties
 analytics.settings
 *.jks
