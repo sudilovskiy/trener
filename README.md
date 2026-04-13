@@ -1,3 +1,55 @@
+# Trener
+
+Android workout tracking app with progress analytics and BLE weight integration.
+
+---
+
+## Key Features
+
+- Workout session tracking (multi-day split)
+- Exercise progress analytics (current vs previous)
+- Body weight tracking (manual + BLE scale)
+- Workout history with detailed sessions
+- Backup & restore support
+
+---
+
+## Tech Stack
+
+- Kotlin
+- Jetpack Compose
+- Room (SQLite)
+- Android BLE
+- Health Connect
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/screen_main.png" width="250"/>
+  <img src="screenshots/screen_workout.png" width="250"/>
+  <img src="screenshots/screen_history.png" width="250"/>
+  <img src="screenshots/screen_weight.png" width="250"/>
+</p>
+
+---
+
+## Project Level
+
+- Full Android app (not a demo)
+- Local database + domain layer
+- BLE device integration
+- Real user workflow implemented
+
+---
+
+## Description (RU)
+
+
+
+
+
 # Тренер
 
 `Тренер` — Android-приложение для учета домашних тренировок и контроля веса.
