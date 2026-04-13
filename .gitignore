@@ -14,6 +14,9 @@ build/
 app/build/
 app/release/
 local.properties
+analytics.settings
+*.jks
+*.keystore
 *.apk
 *.aab
 backup_current_version_*.zip
