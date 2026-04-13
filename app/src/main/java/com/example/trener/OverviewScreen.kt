@@ -72,7 +72,6 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.toArgb
 import com.example.trener.normalizedWeight
 import com.example.trener.data.local.BodyWeightHistoryRepository
-import com.example.trener.data.local.TrenerDatabaseProvider
 import com.example.trener.data.local.entity.BodyWeightEntryEntity
 import com.example.trener.data.local.entity.WorkoutSessionEntity
 import kotlinx.coroutines.Dispatchers
@@ -124,10 +123,7 @@ fun OverviewScreen(
     onHistoryDateClick: (Long) -> Unit
 ) {
     val uiContext = LocalContext.current
-    val appContext = uiContext.applicationContext
-    val database = remember(appContext, databaseRefreshToken) {
-        TrenerDatabaseProvider.getInstance(appContext)
-    }
+    val database = rememberTrenerDatabase(databaseRefreshToken)
     val bodyWeightRepository = remember(database) {
         BodyWeightHistoryRepository(database)
     }

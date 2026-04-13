@@ -32,7 +32,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.example.trener.data.local.TrenerDatabaseProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -51,9 +50,7 @@ fun ExerciseComparisonScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current.applicationContext
-    val database = remember(context, databaseRefreshToken) {
-        TrenerDatabaseProvider.getInstance(context)
-    }
+    val database = rememberTrenerDatabase(databaseRefreshToken)
     val allExercises = remember { getAllExercises() }
     val defaultExerciseA = remember(allExercises) {
         allExercises.firstOrNull()?.exerciseId.orEmpty()

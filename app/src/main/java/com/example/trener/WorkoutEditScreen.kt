@@ -38,7 +38,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.example.trener.data.local.TrenerDatabaseProvider
 import com.example.trener.data.local.entity.WorkoutSessionEntity
 import com.example.trener.data.local.entity.WorkoutSessionSetEntity
 import com.example.trener.domain.workout.GetWorkoutSessionWithSets
@@ -59,9 +58,7 @@ fun WorkoutEditScreen(
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current.applicationContext
-    val database = remember(context, databaseRefreshToken) {
-        TrenerDatabaseProvider.getInstance(context)
-    }
+    val database = rememberTrenerDatabase(databaseRefreshToken)
     val getWorkoutSessionWithSets = remember(database) { GetWorkoutSessionWithSets(database) }
     val replaceWorkoutSessionSets = remember(database) { ReplaceWorkoutSessionSets(database) }
     val coroutineScope = rememberCoroutineScope()

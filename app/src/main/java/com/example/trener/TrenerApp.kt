@@ -1,7 +1,6 @@
 package com.example.trener
 
 import android.app.Activity
-import android.net.Uri
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -31,9 +30,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.trener.data.local.TrenerDatabaseProvider
 import com.example.trener.healthconnect.HealthConnectWeightImportService
 import com.example.trener.ble.BleEntryScreen
+import com.example.trener.ui.navigation.AppRoute
+import com.example.trener.ui.navigation.getNextTrainingDay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,9 +59,7 @@ fun TrenerApp() {
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
     var shouldExitAfterWorkoutSave by rememberSaveable { mutableStateOf(false) }
     val sessionUiState = remember { WorkoutSessionUiState() }
-    val database = remember(context, databaseRefreshToken) {
-        TrenerDatabaseProvider.getInstance(context)
-    }
+    val database = rememberTrenerDatabase(databaseRefreshToken)
     val view = LocalView.current
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
@@ -356,33 +354,5 @@ fun TrenerApp() {
                 )
             }
         }
-    }
-}
-
-private object AppRoute {
-    const val Overview = "overview"
-    const val Workout = "workout"
-    const val History = "history"
-    const val SessionIdArg = "sessionId"
-    const val DateEpochDayArg = "dateEpochDay"
-    const val ExerciseIdArg = "exerciseId"
-    const val HistoryByDate = "history/date/{$DateEpochDayArg}"
-    const val WorkoutDetail = "history/{$SessionIdArg}"
-    const val WorkoutEdit = "history/{$SessionIdArg}/edit"
-    const val Exercise = "exercise/{$ExerciseIdArg}"
-    const val ExerciseComparison = "exercise/comparison"
-    const val BleEntry = "weight/ble-entry"
-
-    fun workoutDetail(sessionId: Long): String = "history/$sessionId"
-    fun historyForDate(epochDay: Long): String = "history/date/$epochDay"
-    fun workoutEdit(sessionId: Long): String = "history/$sessionId/edit"
-    fun exercise(exerciseId: String): String = "exercise/${Uri.encode(exerciseId)}"
-}
-
-private fun getNextTrainingDay(trainingDay: Int): Int {
-    return when (trainingDay) {
-        1 -> 2
-        2 -> 3
-        else -> 1
     }
 }

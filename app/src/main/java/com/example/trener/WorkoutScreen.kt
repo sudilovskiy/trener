@@ -33,7 +33,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.example.trener.data.local.TrenerDatabaseProvider
 import com.example.trener.data.local.entity.WorkoutSessionEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -49,9 +48,7 @@ fun WorkoutScreen(
     onExerciseClick: (String) -> Unit
 ) {
     val context = LocalContext.current.applicationContext
-    val database = remember(context, databaseRefreshToken) {
-        TrenerDatabaseProvider.getInstance(context)
-    }
+    val database = rememberTrenerDatabase(databaseRefreshToken)
     val coroutineScope = rememberCoroutineScope()
     val dayExercises = remember(trainingDay) { getExercisesForDay(trainingDay) }
 

@@ -34,7 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.example.trener.data.local.TrenerDatabaseProvider
 import com.example.trener.domain.workout.GetWorkoutSessionWithSets
 import com.example.trener.domain.workout.WorkoutSessionWithSets
 import com.example.trener.data.local.entity.WorkoutSessionEntity
@@ -54,9 +53,7 @@ fun WorkoutDetailScreen(
     onDeleteSuccess: () -> Unit
 ) {
     val context = LocalContext.current.applicationContext
-    val database = remember(context, databaseRefreshToken) {
-        TrenerDatabaseProvider.getInstance(context)
-    }
+    val database = rememberTrenerDatabase(databaseRefreshToken)
     val getWorkoutSessionWithSets = remember(database) { GetWorkoutSessionWithSets(database) }
     val coroutineScope = rememberCoroutineScope()
 

@@ -1,7 +1,9 @@
 .android/
+.android-home/
 .android-sdk/
 .android-user-home/
 .gradle/
+.gradle-home/
 .gradle-user/
 .gradle-user-home/
 .idea/
@@ -10,6 +12,7 @@
 .userhome/
 build/
 app/build/
+app/release/
 local.properties
 *.apk
 *.aab

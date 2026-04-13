@@ -38,7 +38,6 @@ import com.example.trener.data.local.ClearWorkoutDataResult
 import com.example.trener.data.local.DatabaseMaintenanceFailureReason
 import com.example.trener.data.local.DatabaseMaintenanceService
 import com.example.trener.data.local.RestoreDatabaseResult
-import com.example.trener.data.local.TrenerDatabaseProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,9 +54,7 @@ fun WorkoutHistoryScreen(
     onSessionClick: (Long) -> Unit
 ) {
     val context = LocalContext.current.applicationContext
-    val database = remember(context, databaseRefreshToken) {
-        TrenerDatabaseProvider.getInstance(context)
-    }
+    val database = rememberTrenerDatabase(databaseRefreshToken)
     val coroutineScope = rememberCoroutineScope()
 
     var historyItems by remember { mutableStateOf<List<WorkoutHistoryItem>>(emptyList()) }
