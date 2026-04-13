@@ -23,14 +23,13 @@ Android workout tracking app with progress analytics and BLE weight integration.
 - Health Connect
 
 ---
-
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/screen_main.png" width="250"/>
-  <img src="screenshots/screen_workout.png" width="250"/>
-  <img src="screenshots/screen_history.png" width="250"/>
-  <img src="screenshots/screen_weight.png" width="250"/>
+  <img src="screenshots/screen_main.jpg" width="250"/>
+  <img src="screenshots/screen_workout.jpg" width="250"/>
+  <img src="screenshots/screen_history.jpg" width="250"/>
+  <img src="screenshots/screen_weight.jpg" width="250"/>
 </p>
 
 ---
