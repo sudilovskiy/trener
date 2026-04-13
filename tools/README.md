@@ -30,6 +30,9 @@
 - `tools\repo-gradle.bat <gradle task>`
   Запускает `gradlew` с безопасными путями для `GRADLE_USER_HOME`, `ANDROID_USER_HOME`, `ANDROID_SDK_ROOT`.
 
+- `tools\seed-demo-data.bat`
+  Забирает базу установленного приложения с подключенного Android-устройства, заполняет её демонстрационными данными за 10 дней и возвращает обратно в приложение.
+
 Примеры:
 
 ```bat
@@ -38,6 +41,7 @@ tools\repo-fix.bat
 tools\repo-clean-build.bat
 tools\repo-gradle.bat assembleDebug
 tools\repo-gradle.bat test
+tools\seed-demo-data.bat
 ```
 
 Как перенести в другой проект:
@@ -46,8 +50,15 @@ tools\repo-gradle.bat test
 2. Запусти `tools\repo-fix.bat`.
 3. При необходимости используй `tools\repo-status.bat` для проверки и `tools\repo-gradle.bat` для безопасного запуска Gradle.
 
+Для демо-заливки на устройство:
+
+1. Убедись, что приложение `com.example.trener` уже установлено на Android-устройстве.
+2. Подключи устройство по USB и разреши `adb`.
+3. Запусти `tools\seed-demo-data.bat`.
+
 Что важно:
 
 - обычные `app\build` и `.gradle` после сборки Android Studio могут появляться снова, это нормально;
 - скрипты в первую очередь борются не с обычной сборкой, а с нештатными дублирующимися локальными кэшами внутри репозитория;
 - Android Studio не будет автоматически запускать эти скрипты сама, их нужно запускать вручную или встроить в свой процесс работы.
+- `tools\seed-demo-data.bat` рассчитан на пакет `com.example.trener` и подключённое Android-устройство с доступным `adb`.
