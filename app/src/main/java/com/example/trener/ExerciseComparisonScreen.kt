@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -27,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -40,6 +42,17 @@ private enum class ComparisonSheet {
     SelectorA,
     SelectorB,
     Range
+}
+
+private enum class ComparisonRangeTarget {
+    Synced,
+    ChartA,
+    ChartB
+}
+
+private enum class ComparisonMetricMode {
+    ExerciseComparison,
+    TrainingDuration
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,61 +71,201 @@ fun ExerciseComparisonScreen(
     val defaultExerciseB = remember(allExercises, defaultExerciseA) {
         allExercises.getOrNull(1)?.exerciseId ?: defaultExerciseA
     }
+    var comparisonMetricMode by rememberSaveable {
+        mutableStateOf(ComparisonMetricMode.ExerciseComparison)
+    }
     var selectedExerciseA by rememberSaveable { mutableStateOf(defaultExerciseA) }
     var selectedExerciseB by rememberSaveable { mutableStateOf(defaultExerciseB) }
     var exerciseProgressEntriesA by remember { mutableStateOf<List<ExerciseProgressPoint>>(emptyList()) }
     var exerciseProgressEntriesB by remember { mutableStateOf<List<ExerciseProgressPoint>>(emptyList()) }
+    var trainingDurationEntries by remember { mutableStateOf<List<WorkoutDurationPoint>>(emptyList()) }
 
-    var sharedRangeMode by rememberSaveable {
+    var syncRanges by rememberSaveable { mutableStateOf(false) }
+    var rangeModeA by rememberSaveable {
         mutableStateOf(ExerciseProgressRangeMode.SevenDays)
     }
-    var sharedRangeStartEpochDay by rememberSaveable {
+    var rangeStartEpochDayA by rememberSaveable {
         mutableLongStateOf(LocalDate.now().minusDays(6).toEpochDay())
     }
-    var sharedRangeEndEpochDay by rememberSaveable {
+    var rangeEndEpochDayA by rememberSaveable {
         mutableLongStateOf(LocalDate.now().toEpochDay())
     }
-    var sharedRangeDraftMode by rememberSaveable {
+    var rangeModeB by rememberSaveable {
         mutableStateOf(ExerciseProgressRangeMode.SevenDays)
     }
-    var sharedRangeDraftStartEpochDay by rememberSaveable {
+    var rangeStartEpochDayB by rememberSaveable {
         mutableLongStateOf(LocalDate.now().minusDays(6).toEpochDay())
     }
-    var sharedRangeDraftEndEpochDay by rememberSaveable {
+    var rangeEndEpochDayB by rememberSaveable {
+        mutableLongStateOf(LocalDate.now().toEpochDay())
+    }
+    var syncedRangeMode by rememberSaveable {
+        mutableStateOf(ExerciseProgressRangeMode.SevenDays)
+    }
+    var syncedRangeStartEpochDay by rememberSaveable {
+        mutableLongStateOf(LocalDate.now().minusDays(6).toEpochDay())
+    }
+    var syncedRangeEndEpochDay by rememberSaveable {
+        mutableLongStateOf(LocalDate.now().toEpochDay())
+    }
+    var rangeDraftMode by rememberSaveable {
+        mutableStateOf(ExerciseProgressRangeMode.SevenDays)
+    }
+    var rangeDraftStartEpochDay by rememberSaveable {
+        mutableLongStateOf(LocalDate.now().minusDays(6).toEpochDay())
+    }
+    var rangeDraftEndEpochDay by rememberSaveable {
+        mutableLongStateOf(LocalDate.now().toEpochDay())
+    }
+    var durationRangeMode by rememberSaveable {
+        mutableStateOf(ExerciseProgressRangeMode.All)
+    }
+    var durationRangeStartEpochDay by rememberSaveable {
+        mutableLongStateOf(LocalDate.now().minusDays(6).toEpochDay())
+    }
+    var durationRangeEndEpochDay by rememberSaveable {
+        mutableLongStateOf(LocalDate.now().toEpochDay())
+    }
+    var durationRangeDraftMode by rememberSaveable {
+        mutableStateOf(ExerciseProgressRangeMode.All)
+    }
+    var durationRangeDraftStartEpochDay by rememberSaveable {
+        mutableLongStateOf(LocalDate.now().minusDays(6).toEpochDay())
+    }
+    var durationRangeDraftEndEpochDay by rememberSaveable {
         mutableLongStateOf(LocalDate.now().toEpochDay())
     }
     var activeSheet by remember { mutableStateOf<ComparisonSheet?>(null) }
+    var comparisonRangeTarget by rememberSaveable {
+        mutableStateOf(ComparisonRangeTarget.Synced)
+    }
     val rangeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var hasInitializedRange by rememberSaveable { mutableStateOf(false) }
-    var hasManualRangeChange by rememberSaveable { mutableStateOf(false) }
+    var hasInitializedRangeA by rememberSaveable { mutableStateOf(false) }
+    var hasInitializedRangeB by rememberSaveable { mutableStateOf(false) }
+    var hasManualRangeChangeA by rememberSaveable { mutableStateOf(false) }
+    var hasManualRangeChangeB by rememberSaveable { mutableStateOf(false) }
+    var hasInitializedDurationRange by rememberSaveable { mutableStateOf(false) }
+    var hasManualDurationRangeChange by rememberSaveable { mutableStateOf(false) }
     val orientation = LocalConfiguration.current.orientation
     val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    val visibleRange = remember(sharedRangeStartEpochDay, sharedRangeEndEpochDay) {
+    val rangeA = remember(rangeStartEpochDayA, rangeEndEpochDayA) {
         ExerciseProgressRange(
-            startEpochDay = sharedRangeStartEpochDay,
-            endEpochDay = sharedRangeEndEpochDay
+            startEpochDay = rangeStartEpochDayA,
+            endEpochDay = rangeEndEpochDayA
         )
     }
-    val combinedRecords = remember(exerciseProgressEntriesA, exerciseProgressEntriesB) {
-        (exerciseProgressEntriesA + exerciseProgressEntriesB)
-            .sortedBy(ExerciseProgressPoint::entryDateEpochDay)
+    val rangeB = remember(rangeStartEpochDayB, rangeEndEpochDayB) {
+        ExerciseProgressRange(
+            startEpochDay = rangeStartEpochDayB,
+            endEpochDay = rangeEndEpochDayB
+        )
     }
+    val syncedRange = remember(syncedRangeStartEpochDay, syncedRangeEndEpochDay) {
+        ExerciseProgressRange(
+            startEpochDay = syncedRangeStartEpochDay,
+            endEpochDay = syncedRangeEndEpochDay
+        )
+    }
+    val visibleRangeA = if (syncRanges) syncedRange else rangeA
+    val visibleRangeB = if (syncRanges) syncedRange else rangeB
     val selectedExerciseLabelA = remember(selectedExerciseA, context) {
         getExerciseLabel(context, selectedExerciseA)
     }
     val selectedExerciseLabelB = remember(selectedExerciseB, context) {
         getExerciseLabel(context, selectedExerciseB)
     }
-    val filteredEntriesA = remember(exerciseProgressEntriesA, visibleRange) {
-        exerciseProgressEntriesA.filter { point ->
-            point.entryDateEpochDay in visibleRange.startEpochDay..visibleRange.endEpochDay
+    val exerciseComparisonSeriesA = remember(exerciseProgressEntriesA) {
+        exerciseProgressEntriesA.map(ExerciseProgressPoint::toComparisonSeriesPoint)
+    }
+    val exerciseComparisonSeriesB = remember(exerciseProgressEntriesB) {
+        exerciseProgressEntriesB.map(ExerciseProgressPoint::toComparisonSeriesPoint)
+    }
+    val combinedSeriesRecords = remember(exerciseComparisonSeriesA, exerciseComparisonSeriesB) {
+        (exerciseComparisonSeriesA + exerciseComparisonSeriesB)
+            .sortedBy(ComparisonSeriesPoint::entryDateEpochDay)
+    }
+    val trainingDurationSeries = remember(trainingDurationEntries) {
+        trainingDurationEntries.map(WorkoutDurationPoint::toComparisonSeriesPoint)
+    }
+    val filteredSeriesA = remember(exerciseComparisonSeriesA, visibleRangeA) {
+        exerciseComparisonSeriesA.filter { point ->
+            point.entryDateEpochDay in visibleRangeA.startEpochDay..visibleRangeA.endEpochDay
         }
     }
-    val filteredEntriesB = remember(exerciseProgressEntriesB, visibleRange) {
-        exerciseProgressEntriesB.filter { point ->
-            point.entryDateEpochDay in visibleRange.startEpochDay..visibleRange.endEpochDay
+    val filteredSeriesB = remember(exerciseComparisonSeriesB, visibleRangeB) {
+        exerciseComparisonSeriesB.filter { point ->
+            point.entryDateEpochDay in visibleRangeB.startEpochDay..visibleRangeB.endEpochDay
         }
+    }
+    val durationVisibleRange = remember(durationRangeStartEpochDay, durationRangeEndEpochDay) {
+        ExerciseProgressRange(
+            startEpochDay = durationRangeStartEpochDay,
+            endEpochDay = durationRangeEndEpochDay
+        )
+    }
+    val filteredDurationSeries = remember(trainingDurationSeries, durationVisibleRange) {
+        trainingDurationSeries.filter { point ->
+            point.entryDateEpochDay in durationVisibleRange.startEpochDay..durationVisibleRange.endEpochDay
+        }
+    }
+
+    fun updateRangeA(mode: ExerciseProgressRangeMode, range: ExerciseProgressRange) {
+        hasManualRangeChangeA = true
+        rangeModeA = mode
+        rangeStartEpochDayA = range.startEpochDay
+        rangeEndEpochDayA = range.endEpochDay
+    }
+
+    fun updateRangeB(mode: ExerciseProgressRangeMode, range: ExerciseProgressRange) {
+        hasManualRangeChangeB = true
+        rangeModeB = mode
+        rangeStartEpochDayB = range.startEpochDay
+        rangeEndEpochDayB = range.endEpochDay
+    }
+
+    fun updateSyncedRange(mode: ExerciseProgressRangeMode, range: ExerciseProgressRange) {
+        syncedRangeMode = mode
+        syncedRangeStartEpochDay = range.startEpochDay
+        syncedRangeEndEpochDay = range.endEpochDay
+    }
+
+    fun setSyncRanges(enabled: Boolean) {
+        if (enabled == syncRanges) {
+            return
+        }
+        if (enabled) {
+            syncedRangeMode = rangeModeA
+            syncedRangeStartEpochDay = rangeA.startEpochDay
+            syncedRangeEndEpochDay = rangeA.endEpochDay
+        }
+        syncRanges = enabled
+    }
+
+    fun seedComparisonRangeDraft(target: ComparisonRangeTarget) {
+        when (target) {
+            ComparisonRangeTarget.Synced -> {
+                rangeDraftMode = syncedRangeMode
+                rangeDraftStartEpochDay = syncedRange.startEpochDay
+                rangeDraftEndEpochDay = syncedRange.endEpochDay
+            }
+            ComparisonRangeTarget.ChartA -> {
+                rangeDraftMode = rangeModeA
+                rangeDraftStartEpochDay = rangeA.startEpochDay
+                rangeDraftEndEpochDay = rangeA.endEpochDay
+            }
+            ComparisonRangeTarget.ChartB -> {
+                rangeDraftMode = rangeModeB
+                rangeDraftStartEpochDay = rangeB.startEpochDay
+                rangeDraftEndEpochDay = rangeB.endEpochDay
+            }
+        }
+    }
+
+    fun openComparisonRangeSheet(target: ComparisonRangeTarget) {
+        comparisonRangeTarget = target
+        seedComparisonRangeDraft(target)
+        activeSheet = ComparisonSheet.Range
     }
 
     LaunchedEffect(selectedExerciseA, databaseRefreshToken, historyRefreshToken) {
@@ -133,20 +286,60 @@ fun ExerciseComparisonScreen(
         }
     }
 
-    LaunchedEffect(combinedRecords, hasInitializedRange, hasManualRangeChange) {
-        if (hasInitializedRange || hasManualRangeChange || combinedRecords.isEmpty()) {
+    LaunchedEffect(databaseRefreshToken, historyRefreshToken) {
+        trainingDurationEntries = withContext(Dispatchers.IO) {
+            loadWorkoutDurationEntries(database)
+        }
+    }
+
+    LaunchedEffect(exerciseProgressEntriesA, hasInitializedRangeA, hasManualRangeChangeA) {
+        if (hasInitializedRangeA || hasManualRangeChangeA || exerciseProgressEntriesA.isEmpty()) {
             return@LaunchedEffect
         }
 
         val resolvedRange = resolveExerciseProgressRange(
-            records = combinedRecords,
+            records = exerciseProgressEntriesA,
             mode = ExerciseProgressRangeMode.All,
-            currentRange = visibleRange
+            currentRange = rangeA
         )
-        sharedRangeMode = ExerciseProgressRangeMode.All
-        sharedRangeStartEpochDay = resolvedRange.startEpochDay
-        sharedRangeEndEpochDay = resolvedRange.endEpochDay
-        hasInitializedRange = true
+        rangeModeA = ExerciseProgressRangeMode.All
+        rangeStartEpochDayA = resolvedRange.startEpochDay
+        rangeEndEpochDayA = resolvedRange.endEpochDay
+        syncedRangeMode = ExerciseProgressRangeMode.All
+        syncedRangeStartEpochDay = resolvedRange.startEpochDay
+        syncedRangeEndEpochDay = resolvedRange.endEpochDay
+        hasInitializedRangeA = true
+    }
+
+    LaunchedEffect(exerciseProgressEntriesB, hasInitializedRangeB, hasManualRangeChangeB) {
+        if (hasInitializedRangeB || hasManualRangeChangeB || exerciseProgressEntriesB.isEmpty()) {
+            return@LaunchedEffect
+        }
+
+        val resolvedRange = resolveExerciseProgressRange(
+            records = exerciseProgressEntriesB,
+            mode = ExerciseProgressRangeMode.All,
+            currentRange = rangeB
+        )
+        rangeStartEpochDayB = resolvedRange.startEpochDay
+        rangeEndEpochDayB = resolvedRange.endEpochDay
+        hasInitializedRangeB = true
+    }
+
+    LaunchedEffect(trainingDurationEntries, hasInitializedDurationRange, hasManualDurationRangeChange) {
+        if (hasInitializedDurationRange || hasManualDurationRangeChange || trainingDurationEntries.isEmpty()) {
+            return@LaunchedEffect
+        }
+
+        val resolvedRange = resolveWorkoutDurationRange(
+            records = trainingDurationEntries,
+            mode = ExerciseProgressRangeMode.All,
+            currentRange = durationVisibleRange
+        )
+        durationRangeMode = ExerciseProgressRangeMode.All
+        durationRangeStartEpochDay = resolvedRange.startEpochDay
+        durationRangeEndEpochDay = resolvedRange.endEpochDay
+        hasInitializedDurationRange = true
     }
 
     Scaffold(
@@ -173,118 +366,280 @@ fun ExerciseComparisonScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedButton(
-                    onClick = { activeSheet = ComparisonSheet.SelectorA },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = stringResource(
-                            R.string.exercise_comparison_selector_a,
-                            selectedExerciseLabelA
-                        ),
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-                OutlinedButton(
-                    onClick = { activeSheet = ComparisonSheet.SelectorB },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = stringResource(
-                            R.string.exercise_comparison_selector_b,
-                            selectedExerciseLabelB
-                        ),
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-            }
-
-            OutlinedButton(
-                onClick = {
-                    sharedRangeDraftMode = sharedRangeMode
-                    sharedRangeDraftStartEpochDay = sharedRangeStartEpochDay
-                    sharedRangeDraftEndEpochDay = sharedRangeEndEpochDay
-                    activeSheet = ComparisonSheet.Range
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = stringResource(
-                        R.string.exercise_progress_range_label,
-                        sharedRangeMode.displayLabel(context)
-                    ),
-                    maxLines = 1,
-                    softWrap = false
+                ExerciseSelectorButton(
+                    label = stringResource(R.string.exercise_comparison_metric_exercise),
+                    selected = comparisonMetricMode == ComparisonMetricMode.ExerciseComparison,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        comparisonMetricMode = ComparisonMetricMode.ExerciseComparison
+                        activeSheet = null
+                    }
+                )
+                ExerciseSelectorButton(
+                    label = stringResource(R.string.exercise_comparison_metric_duration),
+                    selected = comparisonMetricMode == ComparisonMetricMode.TrainingDuration,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        comparisonMetricMode = ComparisonMetricMode.TrainingDuration
+                        activeSheet = null
+                    }
                 )
             }
 
-            if (isLandscape) {
+            if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ComparisonChartPanel(
-                        title = selectedExerciseLabelA,
-                        entries = filteredEntriesA,
-                        range = visibleRange,
-                        sharedRecords = combinedRecords,
-                        sharedRange = visibleRange,
-                        onRangeChanged = { range ->
-                            hasManualRangeChange = true
-                            sharedRangeMode = ExerciseProgressRangeMode.Custom
-                            sharedRangeStartEpochDay = range.startEpochDay
-                            sharedRangeEndEpochDay = range.endEpochDay
-                        },
+                    OutlinedButton(
+                        onClick = { activeSheet = ComparisonSheet.SelectorA },
                         modifier = Modifier.weight(1f)
-                    )
-                    ComparisonChartPanel(
-                        title = selectedExerciseLabelB,
-                        entries = filteredEntriesB,
-                        range = visibleRange,
-                        sharedRecords = combinedRecords,
-                        sharedRange = visibleRange,
-                        onRangeChanged = { range ->
-                            hasManualRangeChange = true
-                            sharedRangeMode = ExerciseProgressRangeMode.Custom
-                            sharedRangeStartEpochDay = range.startEpochDay
-                            sharedRangeEndEpochDay = range.endEpochDay
-                        },
+                    ) {
+                        Text(
+                            text = stringResource(
+                                R.string.exercise_comparison_selector_a,
+                                selectedExerciseLabelA
+                            ),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { activeSheet = ComparisonSheet.SelectorB },
                         modifier = Modifier.weight(1f)
-                    )
+                    ) {
+                        Text(
+                            text = stringResource(
+                                R.string.exercise_comparison_selector_b,
+                                selectedExerciseLabelB
+                            ),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+
+                if (syncRanges) {
+                    val syncedRangeLabel = remember(syncedRangeMode, context) {
+                        syncedRangeMode.displayLabel(context)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = { openComparisonRangeSheet(ComparisonRangeTarget.Synced) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    R.string.exercise_progress_range_label,
+                                    syncedRangeLabel
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = syncRanges,
+                                onCheckedChange = { checked -> setSyncRanges(checked) }
+                            )
+                            Text(text = stringResource(R.string.exercise_comparison_sync_ranges))
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = syncRanges,
+                            onCheckedChange = { checked -> setSyncRanges(checked) }
+                        )
+                        Text(text = stringResource(R.string.exercise_comparison_sync_ranges))
+                    }
+                }
+
+                if (isLandscape) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (!syncRanges) {
+                                val rangeLabelA = remember(rangeModeA, context) {
+                                    rangeModeA.displayLabel(context)
+                                }
+                                ComparisonRangeControlButton(
+                                    label = stringResource(
+                                        R.string.exercise_comparison_selector_a,
+                                        rangeLabelA
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = { openComparisonRangeSheet(ComparisonRangeTarget.ChartA) }
+                                )
+                            }
+                            ComparisonChartPanel(
+                                title = selectedExerciseLabelA,
+                                entries = filteredSeriesA,
+                                range = visibleRangeA,
+                                gestureRecords = if (syncRanges) combinedSeriesRecords else exerciseComparisonSeriesA,
+                                gestureRange = visibleRangeA,
+                                onRangeChanged = { range ->
+                                    if (syncRanges) {
+                                        updateSyncedRange(ExerciseProgressRangeMode.Custom, range)
+                                    } else {
+                                        updateRangeA(ExerciseProgressRangeMode.Custom, range)
+                                    }
+                                }
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (!syncRanges) {
+                                val rangeLabelB = remember(rangeModeB, context) {
+                                    rangeModeB.displayLabel(context)
+                                }
+                                ComparisonRangeControlButton(
+                                    label = stringResource(
+                                        R.string.exercise_comparison_selector_b,
+                                        rangeLabelB
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = { openComparisonRangeSheet(ComparisonRangeTarget.ChartB) }
+                                )
+                            }
+                            ComparisonChartPanel(
+                                title = selectedExerciseLabelB,
+                                entries = filteredSeriesB,
+                                range = visibleRangeB,
+                                gestureRecords = if (syncRanges) combinedSeriesRecords else exerciseComparisonSeriesB,
+                                gestureRange = visibleRangeB,
+                                onRangeChanged = { range ->
+                                    if (syncRanges) {
+                                        updateSyncedRange(ExerciseProgressRangeMode.Custom, range)
+                                    } else {
+                                        updateRangeB(ExerciseProgressRangeMode.Custom, range)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (!syncRanges) {
+                                val rangeLabelA = remember(rangeModeA, context) {
+                                    rangeModeA.displayLabel(context)
+                                }
+                                ComparisonRangeControlButton(
+                                    label = stringResource(
+                                        R.string.exercise_comparison_selector_a,
+                                        rangeLabelA
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = { openComparisonRangeSheet(ComparisonRangeTarget.ChartA) }
+                                )
+                            }
+                            ComparisonChartPanel(
+                                title = selectedExerciseLabelA,
+                                entries = filteredSeriesA,
+                                range = visibleRangeA,
+                                gestureRecords = if (syncRanges) combinedSeriesRecords else exerciseComparisonSeriesA,
+                                gestureRange = visibleRangeA,
+                                onRangeChanged = { range ->
+                                    if (syncRanges) {
+                                        updateSyncedRange(ExerciseProgressRangeMode.Custom, range)
+                                    } else {
+                                        updateRangeA(ExerciseProgressRangeMode.Custom, range)
+                                    }
+                                }
+                            )
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (!syncRanges) {
+                                val rangeLabelB = remember(rangeModeB, context) {
+                                    rangeModeB.displayLabel(context)
+                                }
+                                ComparisonRangeControlButton(
+                                    label = stringResource(
+                                        R.string.exercise_comparison_selector_b,
+                                        rangeLabelB
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = { openComparisonRangeSheet(ComparisonRangeTarget.ChartB) }
+                                )
+                            }
+                            ComparisonChartPanel(
+                                title = selectedExerciseLabelB,
+                                entries = filteredSeriesB,
+                                range = visibleRangeB,
+                                gestureRecords = if (syncRanges) combinedSeriesRecords else exerciseComparisonSeriesB,
+                                gestureRange = visibleRangeB,
+                                onRangeChanged = { range ->
+                                    if (syncRanges) {
+                                        updateSyncedRange(ExerciseProgressRangeMode.Custom, range)
+                                    } else {
+                                        updateRangeB(ExerciseProgressRangeMode.Custom, range)
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ComparisonChartPanel(
-                        title = selectedExerciseLabelA,
-                        entries = filteredEntriesA,
-                        range = visibleRange,
-                        sharedRecords = combinedRecords,
-                        sharedRange = visibleRange,
-                        onRangeChanged = { range ->
-                            hasManualRangeChange = true
-                            sharedRangeMode = ExerciseProgressRangeMode.Custom
-                            sharedRangeStartEpochDay = range.startEpochDay
-                            sharedRangeEndEpochDay = range.endEpochDay
-                        }
-                    )
-                    ComparisonChartPanel(
-                        title = selectedExerciseLabelB,
-                        entries = filteredEntriesB,
-                        range = visibleRange,
-                        sharedRecords = combinedRecords,
-                        sharedRange = visibleRange,
-                        onRangeChanged = { range ->
-                            hasManualRangeChange = true
-                            sharedRangeMode = ExerciseProgressRangeMode.Custom
-                            sharedRangeStartEpochDay = range.startEpochDay
-                            sharedRangeEndEpochDay = range.endEpochDay
-                        }
-                    )
+                val durationRangeLabel = remember(durationRangeMode, context) {
+                    durationRangeMode.displayLabel(context)
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            durationRangeDraftMode = durationRangeMode
+                            durationRangeDraftStartEpochDay = durationVisibleRange.startEpochDay
+                            durationRangeDraftEndEpochDay = durationVisibleRange.endEpochDay
+                            activeSheet = ComparisonSheet.Range
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = stringResource(
+                                R.string.exercise_progress_range_label,
+                                durationRangeLabel
+                            ),
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+
+                ComparisonChartPanel(
+                    title = stringResource(R.string.exercise_comparison_metric_duration_chart),
+                    entries = filteredDurationSeries,
+                    range = durationVisibleRange,
+                    gestureRecords = trainingDurationSeries,
+                    gestureRange = durationVisibleRange,
+                    valueLabelFormatter = ::formatDurationAxisLabel,
+                    onRangeChanged = { range ->
+                        durationRangeMode = ExerciseProgressRangeMode.Custom
+                        durationRangeStartEpochDay = range.startEpochDay
+                        durationRangeEndEpochDay = range.endEpochDay
+                        hasManualDurationRangeChange = true
+                    }
+                )
             }
-        }
 
         if (activeSheet != null) {
             ModalBottomSheet(
@@ -314,39 +669,102 @@ fun ExerciseComparisonScreen(
                     )
                     ComparisonSheet.Range -> ExerciseProgressRangeSheet(
                         context = context,
-                        selectedMode = sharedRangeDraftMode,
-                        startEpochDay = sharedRangeDraftStartEpochDay,
-                        endEpochDay = sharedRangeDraftEndEpochDay,
+                        selectedMode = if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                            rangeDraftMode
+                        } else {
+                            durationRangeDraftMode
+                        },
+                        startEpochDay = if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                            rangeDraftStartEpochDay
+                        } else {
+                            durationRangeDraftStartEpochDay
+                        },
+                        endEpochDay = if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                            rangeDraftEndEpochDay
+                        } else {
+                            durationRangeDraftEndEpochDay
+                        },
                         onPresetSelected = { preset ->
-                            sharedRangeDraftMode = preset
+                            if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                rangeDraftMode = preset
+                            } else {
+                                durationRangeDraftMode = preset
+                            }
                         },
                         onStartDatePicked = { epochDay ->
-                            sharedRangeDraftStartEpochDay = epochDay
+                            if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                rangeDraftStartEpochDay = epochDay
+                            } else {
+                                durationRangeDraftStartEpochDay = epochDay
+                            }
                         },
                         onEndDatePicked = { epochDay ->
-                            sharedRangeDraftEndEpochDay = epochDay
+                            if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                rangeDraftEndEpochDay = epochDay
+                            } else {
+                                durationRangeDraftEndEpochDay = epochDay
+                            }
                         },
                         onApply = {
-                            val resolvedRange = when (sharedRangeDraftMode) {
-                                ExerciseProgressRangeMode.SevenDays,
-                                ExerciseProgressRangeMode.ThirtyDays,
-                                ExerciseProgressRangeMode.All -> resolveExerciseProgressRange(
-                                    records = combinedRecords,
-                                    mode = sharedRangeDraftMode,
-                                    currentRange = visibleRange
-                                )
-
-                                ExerciseProgressRangeMode.Custom -> resolveClampedExerciseProgressRange(
-                                    startEpochDay = sharedRangeDraftStartEpochDay,
-                                    endEpochDay = sharedRangeDraftEndEpochDay,
-                                    records = combinedRecords
-                                )
+                            val targetRecords = if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                when (comparisonRangeTarget) {
+                                    ComparisonRangeTarget.Synced -> combinedSeriesRecords
+                                    ComparisonRangeTarget.ChartA -> exerciseComparisonSeriesA
+                                    ComparisonRangeTarget.ChartB -> exerciseComparisonSeriesB
+                                }
+                            } else {
+                                trainingDurationSeries
                             }
+                            val targetRange = if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                when (comparisonRangeTarget) {
+                                    ComparisonRangeTarget.Synced -> syncedRange
+                                    ComparisonRangeTarget.ChartA -> rangeA
+                                    ComparisonRangeTarget.ChartB -> rangeB
+                                }
+                            } else {
+                                durationVisibleRange
+                            }
+                            val resolvedRange = resolveComparisonRangeSelection(
+                                mode = if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                    rangeDraftMode
+                                } else {
+                                    durationRangeDraftMode
+                                },
+                                startEpochDay = if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                    rangeDraftStartEpochDay
+                                } else {
+                                    durationRangeDraftStartEpochDay
+                                },
+                                endEpochDay = if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                    rangeDraftEndEpochDay
+                                } else {
+                                    durationRangeDraftEndEpochDay
+                                },
+                                records = targetRecords,
+                                currentRange = targetRange
+                            )
 
-                            hasManualRangeChange = true
-                            sharedRangeMode = sharedRangeDraftMode
-                            sharedRangeStartEpochDay = resolvedRange.startEpochDay
-                            sharedRangeEndEpochDay = resolvedRange.endEpochDay
+                            if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                                when (comparisonRangeTarget) {
+                                    ComparisonRangeTarget.Synced -> updateSyncedRange(
+                                        rangeDraftMode,
+                                        resolvedRange
+                                    )
+                                    ComparisonRangeTarget.ChartA -> updateRangeA(
+                                        rangeDraftMode,
+                                        resolvedRange
+                                    )
+                                    ComparisonRangeTarget.ChartB -> updateRangeB(
+                                        rangeDraftMode,
+                                        resolvedRange
+                                    )
+                                }
+                            } else {
+                                durationRangeMode = durationRangeDraftMode
+                                durationRangeStartEpochDay = resolvedRange.startEpochDay
+                                durationRangeEndEpochDay = resolvedRange.endEpochDay
+                                hasManualDurationRangeChange = true
+                            }
                             activeSheet = null
                         },
                         onDismiss = { activeSheet = null }
@@ -358,14 +776,17 @@ fun ExerciseComparisonScreen(
     }
 }
 
+}
+
 @Composable
 private fun ComparisonChartPanel(
     title: String,
-    entries: List<ExerciseProgressPoint>,
+    entries: List<ComparisonSeriesPoint>,
     range: ExerciseProgressRange,
-    sharedRecords: List<ExerciseProgressPoint>,
-    sharedRange: ExerciseProgressRange,
+    gestureRecords: List<ComparisonSeriesPoint>,
+    gestureRange: ExerciseProgressRange,
     onRangeChanged: (ExerciseProgressRange) -> Unit,
+    valueLabelFormatter: (Double, Double) -> String = ::formatExerciseAxisLabel,
     modifier: Modifier = Modifier
 ) {
     var chartWidthPx by remember { mutableIntStateOf(0) }
@@ -385,10 +806,10 @@ private fun ComparisonChartPanel(
                 .fillMaxWidth()
                 .height(160.dp),
             onSizeChanged = { chartWidthPx = it.width },
-            onGesture = { pan, zoom ->
-                val resolved = resolveExerciseProgressGestureRange(
-                    currentRange = sharedRange,
-                    records = sharedRecords,
+            onGesture = { pan, zoom -> 
+                val resolved = resolveComparisonSeriesGestureRange(
+                    currentRange = gestureRange,
+                    records = gestureRecords,
                     chartWidthPx = chartWidthPx,
                     panX = pan.x,
                     zoom = zoom
@@ -396,7 +817,50 @@ private fun ComparisonChartPanel(
                 if (resolved != null) {
                     onRangeChanged(resolved)
                 }
-            }
+            },
+            valueLabelFormatter = valueLabelFormatter
+        )
+    }
+}
+
+@Composable
+private fun ComparisonRangeControlButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier
+    ) {
+        Text(
+            text = label,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+private fun resolveComparisonRangeSelection(
+    mode: ExerciseProgressRangeMode,
+    startEpochDay: Long,
+    endEpochDay: Long,
+    records: List<ComparisonSeriesPoint>,
+    currentRange: ExerciseProgressRange
+): ExerciseProgressRange {
+    return when (mode) {
+        ExerciseProgressRangeMode.SevenDays,
+        ExerciseProgressRangeMode.ThirtyDays,
+        ExerciseProgressRangeMode.All -> resolveComparisonSeriesRange(
+            records = records,
+            mode = mode,
+            currentRange = currentRange
+        )
+
+        ExerciseProgressRangeMode.Custom -> resolveClampedComparisonSeriesRange(
+            startEpochDay = startEpochDay,
+            endEpochDay = endEpochDay,
+            records = records
         )
     }
 }

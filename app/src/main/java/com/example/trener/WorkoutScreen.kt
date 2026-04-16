@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,16 +51,22 @@ fun WorkoutScreen(
     val context = LocalContext.current.applicationContext
     val database = rememberTrenerDatabase(databaseRefreshToken)
     val coroutineScope = rememberCoroutineScope()
-    val dayExercises = remember(trainingDay) { getExercisesForDay(trainingDay) }
-
-    var elapsedSeconds by remember(trainingDay) { mutableLongStateOf(0L) }
-    var isStarting by remember(trainingDay) { mutableStateOf(false) }
     val activeWorkout = sessionUiState.activeWorkout
-    val isWorkoutStarted = sessionUiState.isWorkoutActiveForDay(trainingDay)
+    val workoutTrainingDay = activeWorkout?.trainingDay ?: trainingDay
+    val dayExercises = remember(workoutTrainingDay) { getExercisesForDay(workoutTrainingDay) }
+
+    var currentTimeMillis by remember(workoutTrainingDay) {
+        mutableLongStateOf(System.currentTimeMillis())
+    }
+    var isStarting by rememberSaveable(workoutTrainingDay) { mutableStateOf(false) }
+    val isWorkoutStarted = sessionUiState.isWorkoutActiveForDay(workoutTrainingDay)
     val isSaving = sessionUiState.isSaving
     val startedAtMillis = activeWorkout
-        ?.takeIf { it.trainingDay == trainingDay }
+        ?.takeIf { it.trainingDay == workoutTrainingDay }
         ?.startedAtMillis
+    val elapsedSeconds = startedAtMillis?.let { startTimestamp ->
+        ((currentTimeMillis - startTimestamp) / 1000L).coerceAtLeast(0L)
+    } ?: 0L
     val saveResult = sessionUiState.lastSaveResult
 
     LaunchedEffect(saveResult) {
@@ -70,13 +77,13 @@ fun WorkoutScreen(
     }
 
     LaunchedEffect(startedAtMillis) {
-        val startTimestamp = startedAtMillis ?: run {
-            elapsedSeconds = 0L
+        if (startedAtMillis == null) {
+            currentTimeMillis = System.currentTimeMillis()
             return@LaunchedEffect
         }
 
         while (true) {
-            elapsedSeconds = ((System.currentTimeMillis() - startTimestamp) / 1000L).coerceAtLeast(0L)
+            currentTimeMillis = System.currentTimeMillis()
             delay(1000L)
         }
     }
@@ -124,7 +131,7 @@ fun WorkoutScreen(
                                         withContext(Dispatchers.IO) {
                                             database.workoutSessionDao().insertWorkoutSession(
                                                 WorkoutSessionEntity(
-                                                    trainingDay = trainingDay,
+                                                    trainingDay = workoutTrainingDay,
                                                     startTimestampEpochMillis = workoutStartedAtMillis
                                                 )
                                             )
@@ -132,10 +139,10 @@ fun WorkoutScreen(
                                     }.onSuccess { sessionId ->
                                         sessionUiState.startWorkout(
                                             sessionId = sessionId,
-                                            trainingDay = trainingDay,
+                                            trainingDay = workoutTrainingDay,
                                             startedAtMillis = workoutStartedAtMillis
                                         )
-                                        elapsedSeconds = 0L
+                                        currentTimeMillis = workoutStartedAtMillis
                                     }.onFailure {
                                         Toast.makeText(
                                             context,

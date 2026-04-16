@@ -22,6 +22,16 @@ data class ExerciseProgressPoint(
     val totalReps: Int
 )
 
+data class ComparisonSeriesPoint(
+    val entryDateEpochDay: Long,
+    val value: Double
+)
+
+data class WorkoutDurationPoint(
+    val entryDateEpochDay: Long,
+    val durationSeconds: Long
+)
+
 data class ExerciseProgressAxisTick(
     val value: Double,
     val step: Double
@@ -38,4 +48,18 @@ fun ExerciseProgressRangeMode.displayLabel(context: Context): String {
         ExerciseProgressRangeMode.All -> context.getString(R.string.exercise_progress_range_all)
         ExerciseProgressRangeMode.Custom -> context.getString(R.string.exercise_progress_range_custom)
     }
+}
+
+fun ExerciseProgressPoint.toComparisonSeriesPoint(): ComparisonSeriesPoint {
+    return ComparisonSeriesPoint(
+        entryDateEpochDay = entryDateEpochDay,
+        value = totalReps.toDouble()
+    )
+}
+
+fun WorkoutDurationPoint.toComparisonSeriesPoint(): ComparisonSeriesPoint {
+    return ComparisonSeriesPoint(
+        entryDateEpochDay = entryDateEpochDay,
+        value = durationSeconds.toDouble()
+    )
 }

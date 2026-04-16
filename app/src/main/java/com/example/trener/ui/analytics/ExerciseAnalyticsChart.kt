@@ -24,10 +24,11 @@ import kotlin.math.pow
 import kotlin.math.roundToLong
 
 @Composable
-internal fun ExerciseProgressChart(
-    entries: List<ExerciseProgressPoint>,
+internal fun ComparisonSeriesChart(
+    entries: List<ComparisonSeriesPoint>,
     range: ExerciseProgressRange,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    formatYAxisLabel: (Double, Double) -> String = ::formatExerciseAxisLabel
 ) {
     val emptyStateColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f)
     val strokeColor = MaterialTheme.colorScheme.primary
@@ -64,12 +65,12 @@ internal fun ExerciseProgressChart(
         }
         val minYTickCount = 3
         val maxYTickCount = if (availableHeight < 128f) 3 else 4
-        val yTicks = buildExerciseYAxisTicks(
+        val yTicks = buildComparisonYAxisTicks(
             points = entries,
             desiredTickCount = maxYTickCount.coerceAtLeast(minYTickCount)
         )
         val yLabelWidth = yTicks.maxOfOrNull { tick ->
-            yLabelPaint.measureText(formatExerciseAxisLabel(tick.value, tick.step))
+            yLabelPaint.measureText(formatYAxisLabel(tick.value, tick.step))
         } ?: 0f
         val xLabelSampleHeight = run {
             val fontMetrics = xLabelPaint.fontMetrics
@@ -101,7 +102,7 @@ internal fun ExerciseProgressChart(
             } else {
                 ((point.entryDateEpochDay - start) / (end - start)).toFloat().coerceIn(0f, 1f)
             }
-            val yFraction = ((point.totalReps - minReps) / repsRange).toFloat().coerceIn(0f, 1f)
+            val yFraction = ((point.value - minReps) / repsRange).toFloat().coerceIn(0f, 1f)
             val x = plotLeft + (xFraction * plotWidth)
             val y = plotTop + ((1f - yFraction) * plotHeight)
             Offset(x, y)
@@ -137,7 +138,7 @@ internal fun ExerciseProgressChart(
             )
             drawIntoCanvas { canvas ->
                 canvas.nativeCanvas.drawText(
-                    formatExerciseAxisLabel(tick.value, tick.step),
+                    formatYAxisLabel(tick.value, tick.step),
                     plotLeft - 6.dp.toPx(),
                     y - (yLabelPaint.descent() + yLabelPaint.ascent()) / 2f,
                     yLabelPaint
@@ -234,12 +235,12 @@ private fun buildExerciseXAxisTicks(
     }.sorted()
 }
 
-private fun buildExerciseYAxisTicks(
-    points: List<ExerciseProgressPoint>,
+private fun buildComparisonYAxisTicks(
+    points: List<ComparisonSeriesPoint>,
     desiredTickCount: Int
 ): List<ExerciseProgressAxisTick> {
-    val minValue = points.minOf { it.totalReps }.toDouble()
-    val maxValue = points.maxOf { it.totalReps }.toDouble()
+    val minValue = points.minOf { it.value }
+    val maxValue = points.maxOf { it.value }
 
     if (abs(maxValue - minValue) < 0.0001) {
         val center = minValue
@@ -297,7 +298,7 @@ private fun niceExerciseStep(value: Double, round: Boolean = true): Double {
     return niceFraction * 10.0.pow(exponent)
 }
 
-private fun formatExerciseAxisLabel(value: Double, step: Double): String {
+internal fun formatExerciseAxisLabel(value: Double, step: Double): String {
     val normalizedStep = abs(step)
     return when {
         normalizedStep >= 1.0 || abs(value - value.roundToLong().toDouble()) < 0.05 -> {

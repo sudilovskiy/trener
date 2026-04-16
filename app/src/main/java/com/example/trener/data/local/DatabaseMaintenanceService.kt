@@ -54,35 +54,55 @@ object DatabaseMaintenanceService {
             var databaseClosed = false
             runCatching {
                 val database = TrenerDatabaseProvider.getInstance(context)
-                val databaseFiles = getBackupSourceFiles(context)
+                database.openHelper.writableDatabase.query(
+                    androidx.sqlite.db.SimpleSQLiteQuery("PRAGMA wal_checkpoint(TRUNCATE)")
+                ).use { cursor ->
+                    while (cursor.moveToNext()) {
+                        // Drain the pragma result set so the checkpoint completes before close.
+                    }
+                }
 
+                val databaseFiles = getBackupSourceFiles(context)
                 if (databaseFiles.isEmpty()) {
                     return@runCatching BackupDatabaseResult.Failure(
                         reason = DatabaseMaintenanceFailureReason.DATABASE_NOT_FOUND
                     )
                 }
 
-                database.close()
-                TrenerDatabaseProvider.closeInstance()
-                databaseClosed = true
+                val stagingRoot = createTempRoot(context, "backup-staging")
+                val stagedFiles = mutableListOf<File>()
 
-                var bytesWritten = 0L
-                ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOutputStream ->
+                try {
                     databaseFiles.forEach { sourceFile ->
-                        zipOutputStream.putNextEntry(ZipEntry(sourceFile.name).apply {
-                            time = sourceFile.lastModified()
-                        })
-                        sourceFile.inputStream().use { inputStream ->
-                            bytesWritten += inputStream.copyTo(zipOutputStream)
-                        }
-                        zipOutputStream.closeEntry()
+                        val stagedFile = File(stagingRoot, sourceFile.name)
+                        copyFile(sourceFile, stagedFile)
+                        stagedFiles += stagedFile
                     }
-                }
 
-                BackupDatabaseResult.Success(
-                    bytesWritten = bytesWritten,
-                    includedFiles = databaseFiles.map(File::getName)
-                )
+                    database.close()
+                    TrenerDatabaseProvider.closeInstance()
+                    databaseClosed = true
+
+                    var bytesWritten = 0L
+                    ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOutputStream ->
+                        stagedFiles.forEach { stagedFile ->
+                            zipOutputStream.putNextEntry(ZipEntry(stagedFile.name).apply {
+                                time = stagedFile.lastModified()
+                            })
+                            stagedFile.inputStream().use { inputStream ->
+                                bytesWritten += inputStream.copyTo(zipOutputStream)
+                            }
+                            zipOutputStream.closeEntry()
+                        }
+                    }
+
+                    BackupDatabaseResult.Success(
+                        bytesWritten = bytesWritten,
+                        includedFiles = stagedFiles.map(File::getName)
+                    )
+                } finally {
+                    stagingRoot.deleteRecursively()
+                }
             }.getOrElse { throwable ->
                 BackupDatabaseResult.Failure(
                     reason = DatabaseMaintenanceFailureReason.UNKNOWN,
@@ -112,16 +132,17 @@ object DatabaseMaintenanceService {
 
                 val extractedRoot = File(stagingRoot, "extracted").apply { mkdirs() }
                 val extractedFiles = extractBackupArchive(context, archiveFile, extractedRoot)
-                val restoredMainDb = extractedFiles[TrenerDatabaseProvider.getDatabaseFile(context).name]
-                    ?: return@runCatching RestoreDatabaseResult.Failure(
+                if (extractedFiles[TrenerDatabaseProvider.getDatabaseFile(context).name] == null) {
+                    return@runCatching RestoreDatabaseResult.Failure(
                         reason = DatabaseMaintenanceFailureReason.INVALID_BACKUP
                     )
-
-                validateRestoredDatabase(restoredMainDb)
+                }
 
                 TrenerDatabaseProvider.closeInstance()
                 databaseClosed = true
-                val restoredFiles = replaceDatabaseFiles(context, extractedFiles)
+                val restoredFiles = replaceDatabaseFiles(context, extractedFiles) { finalMainDbFile ->
+                    validateRestoredDatabase(finalMainDbFile)
+                }
                 TrenerDatabaseProvider.getInstance(context)
 
                 RestoreDatabaseResult.Success(
@@ -162,6 +183,19 @@ object DatabaseMaintenanceService {
                 input.copyTo(output)
             }
         }
+        outputFile.setReadable(true, false)
+        outputFile.setWritable(true, false)
+    }
+
+    private fun copyFile(sourceFile: File, targetFile: File) {
+        targetFile.parentFile?.mkdirs()
+        Files.copy(
+            sourceFile.toPath(),
+            targetFile.toPath(),
+            StandardCopyOption.REPLACE_EXISTING
+        )
+        targetFile.setReadable(true, false)
+        targetFile.setWritable(true, false)
     }
 
     private fun createTempRoot(context: android.content.Context, prefix: String): File {
@@ -239,13 +273,38 @@ object DatabaseMaintenanceService {
                 if (!tables.containsAll(requiredTables)) {
                     throw IllegalArgumentException("Backup is missing required tables.")
                 }
+
+                val foreignKeyViolations = database.rawQuery(
+                    """
+                    PRAGMA foreign_key_check
+                    """.trimIndent(),
+                    null
+                )
+                foreignKeyViolations.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        throw IllegalArgumentException("Backup contains foreign key violations.")
+                    }
+                }
+
+                val integrityCheck = database.rawQuery(
+                    """
+                    PRAGMA integrity_check
+                    """.trimIndent(),
+                    null
+                )
+                integrityCheck.use { cursor ->
+                    if (!cursor.moveToFirst() || cursor.getString(0) != "ok") {
+                        throw IllegalArgumentException("Backup failed integrity check.")
+                    }
+                }
             }
         }
     }
 
     private fun replaceDatabaseFiles(
         context: android.content.Context,
-        extractedFiles: Map<String, File>
+        extractedFiles: Map<String, File>,
+        validateFinalDatabase: (File) -> Unit
     ): List<String> {
         val databaseFiles = TrenerDatabaseProvider.getCompanionDatabaseFiles(context)
         val databaseDirectory = TrenerDatabaseProvider.getDatabaseFile(context).parentFile
@@ -262,6 +321,8 @@ object DatabaseMaintenanceService {
                 moveFile(extractedFile, File(databaseDirectory, fileName))
                 restoredFileNames += fileName
             }
+
+            validateFinalDatabase(File(databaseDirectory, TrenerDatabaseProvider.getDatabaseFile(context).name))
 
             return restoredFileNames
         } catch (throwable: Throwable) {
@@ -302,6 +363,8 @@ object DatabaseMaintenanceService {
                 StandardCopyOption.REPLACE_EXISTING
             )
         }
+        target.setReadable(true, false)
+        target.setWritable(true, false)
     }
 }
 

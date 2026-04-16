@@ -4,9 +4,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
 import com.example.trener.domain.workout.PreparedWorkoutSessionSet
 
-class WorkoutSessionUiState {
+class WorkoutSessionUiState : ViewModel() {
     private val exerciseSets = mutableStateMapOf<String, List<PreparedWorkoutSessionSet>>()
     private val completedSetNumbers = mutableStateMapOf<String, Set<Int>>()
     var activeWorkout by mutableStateOf<ActiveWorkoutState?>(null)
@@ -217,6 +218,9 @@ class WorkoutSessionUiState {
 
     fun beginFinishingWorkout(): ActiveWorkoutFinishRequest? {
         val currentWorkout = activeWorkout ?: return null
+        if (isSaving) {
+            return null
+        }
         val finishTrigger = pendingFinishTrigger ?: return null
 
         isSaving = true

@@ -160,11 +160,12 @@ fun ExerciseProgressRangeSheet(
 
 @Composable
 fun ExerciseProgressChartPanel(
-    entries: List<ExerciseProgressPoint>,
+    entries: List<ComparisonSeriesPoint>,
     range: ExerciseProgressRange,
     modifier: Modifier = Modifier,
     onSizeChanged: (IntSize) -> Unit,
-    onGesture: ((pan: Offset, zoom: Float) -> Unit)? = null
+    onGesture: ((pan: Offset, zoom: Float) -> Unit)? = null,
+    valueLabelFormatter: (Double, Double) -> String = ::formatExerciseAxisLabel
 ) {
     val baseModifier = modifier.onSizeChanged(onSizeChanged)
     val interactiveModifier = if (onGesture == null || entries.isEmpty()) {
@@ -198,10 +199,11 @@ fun ExerciseProgressChartPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
-            ExerciseProgressChart(
+            ComparisonSeriesChart(
                 entries = entries,
                 range = range,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                formatYAxisLabel = valueLabelFormatter
             )
         }
     }

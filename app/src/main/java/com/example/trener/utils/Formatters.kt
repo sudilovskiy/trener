@@ -81,6 +81,33 @@ fun formatElapsedTimer(totalSeconds: Long): String {
     return String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
 }
 
+fun formatDurationAxisLabel(value: Double, step: Double): String {
+    val totalSeconds = value.toLong().coerceAtLeast(0L)
+    return when {
+        totalSeconds >= 3600L || step >= 3600.0 -> {
+            val hours = totalSeconds / 3600L
+            val minutes = (totalSeconds % 3600L) / 60L
+            if (minutes == 0L) {
+                "${hours}h"
+            } else {
+                "${hours}h ${minutes}m"
+            }
+        }
+
+        totalSeconds >= 60L || step >= 60.0 -> {
+            val minutes = totalSeconds / 60L
+            val seconds = totalSeconds % 60L
+            if (seconds == 0L) {
+                "${minutes}m"
+            } else {
+                "${minutes}m ${seconds}s"
+            }
+        }
+
+        else -> "${totalSeconds}s"
+    }
+}
+
 private fun Double.toDisplayString(): String {
     val integerValue = toLong()
     return if (integerValue.toDouble() == this) {

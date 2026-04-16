@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.NavHost
@@ -51,14 +52,14 @@ fun TrenerApp() {
     val navController = rememberNavController()
     val coroutineScope = rememberCoroutineScope()
     val databaseRefreshToken by DatabaseRefreshCoordinator.refreshGeneration.collectAsState()
-    var selectedTrainingDay by remember { mutableIntStateOf(1) }
+    var selectedTrainingDay by rememberSaveable { mutableIntStateOf(1) }
     var lastCompletedTrainingDay by remember { mutableStateOf<Int?>(null) }
     var completedHistoryRefreshToken by remember { mutableIntStateOf(0) }
     var workoutDetailRefreshToken by remember { mutableIntStateOf(0) }
     var healthConnectWeightImportInFlight by remember { mutableStateOf(false) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
     var shouldExitAfterWorkoutSave by rememberSaveable { mutableStateOf(false) }
-    val sessionUiState = remember { WorkoutSessionUiState() }
+    val sessionUiState: WorkoutSessionUiState = viewModel()
     val database = rememberTrenerDatabase(databaseRefreshToken)
     val view = LocalView.current
     val currentBackStackEntry by navController.currentBackStackEntryAsState()

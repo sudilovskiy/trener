@@ -35,12 +35,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
@@ -73,6 +75,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,23 +96,28 @@ fun ExerciseScreen(
     val exerciseDefinition = remember(exerciseId) { getExerciseDefinition(exerciseId) }
     val exerciseName = exerciseDefinition?.let { context.getString(it.labelResId) } ?: exerciseId
     val exerciseInputType = exerciseDefinition?.inputType ?: ExerciseInputType.REPS
+    val isPullUpsExercise = exerciseId == "pull_ups_ui"
     val setStates = sessionUiState.getExerciseSetUiStates(exerciseId, setCount)
     val currentExerciseTotalReps by remember(setStates) {
         derivedStateOf {
             setStates.sumOf { setUiState -> setUiState.set.reps ?: 0 }
         }
     }
-    val isPullUpsExercise = exerciseId == "pull_ups_ui"
-    val areAllVisibleSetsCompleted = setStates.isNotEmpty() && setStates.all(ExerciseSetUiState::isCompleted)
+
+    val isExerciseCompleted = sessionUiState.isExerciseCompleted(exerciseId, setCount)
     val isEditingEnabled = sessionUiState.isExerciseInActiveWorkout(exerciseId) && !sessionUiState.isSaving
     val focusManager = LocalFocusManager.current
-    var savingSetNumber by remember(exerciseId) { mutableStateOf<Int?>(null) }
-    var isFinishingAllSets by remember(exerciseId) { mutableStateOf(false) }
+    var savingSetNumber by rememberSaveable(exerciseId) { mutableStateOf<Int?>(null) }
+    var isFinishingAllSets by rememberSaveable(exerciseId) { mutableStateOf(false) }
+    var hasRequestedFinishNavigation by rememberSaveable(exerciseId) { mutableStateOf(false) }
     var showFinishExerciseConfirmation by rememberSaveable(exerciseId) { mutableStateOf(false) }
     var historyLoaded by rememberSaveable(exerciseId) { mutableStateOf(false) }
     var previousExerciseTotalReps by remember(exerciseId) { mutableIntStateOf(0) }
     var exerciseProgressEntries by remember(exerciseId) {
         mutableStateOf<List<ExerciseProgressPoint>>(emptyList())
+    }
+    var exerciseProgressRangeMode by rememberSaveable(exerciseId) {
+        mutableStateOf(ExerciseProgressRangeMode.All)
     }
     var exerciseProgressRange by remember(exerciseId) {
         mutableStateOf(
@@ -119,8 +127,65 @@ fun ExerciseScreen(
             )
         )
     }
+    var showExerciseRangeSheet by remember { mutableStateOf(false) }
+    var exerciseProgressDraftRangeMode by rememberSaveable(exerciseId) {
+        mutableStateOf(ExerciseProgressRangeMode.All)
+    }
+    var exerciseProgressDraftStartEpochDay by rememberSaveable(exerciseId) {
+        mutableStateOf(LocalDate.now().minusDays(6).toEpochDay())
+    }
+    var exerciseProgressDraftEndEpochDay by rememberSaveable(exerciseId) {
+        mutableStateOf(LocalDate.now().toEpochDay())
+    }
     var maxValuesBySetNumber by remember(exerciseId, exerciseInputType) {
         mutableStateOf<Map<Int, Int>>(emptyMap())
+    }
+    val exerciseRangeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val fullDateFormatter = remember { DateTimeFormatter.ofPattern("dd.MM.yyyy") }
+    val filteredExerciseProgressEntries = remember(exerciseProgressEntries, exerciseProgressRange) {
+        exerciseProgressEntries.filter { point ->
+            point.entryDateEpochDay in exerciseProgressRange.startEpochDay..exerciseProgressRange.endEpochDay
+        }
+    }
+    val filteredExerciseProgressSeries = remember(filteredExerciseProgressEntries) {
+        filteredExerciseProgressEntries.map(ExerciseProgressPoint::toComparisonSeriesPoint)
+    }
+
+    fun finishExerciseOnce() {
+        if (hasRequestedFinishNavigation) return
+        hasRequestedFinishNavigation = true
+        onFinished()
+    }
+
+    fun openExerciseRangeSheet() {
+        exerciseProgressDraftRangeMode = exerciseProgressRangeMode
+        exerciseProgressDraftStartEpochDay = exerciseProgressRange.startEpochDay
+        exerciseProgressDraftEndEpochDay = exerciseProgressRange.endEpochDay
+        showExerciseRangeSheet = true
+    }
+
+    fun applyExerciseRangeSelection(
+        mode: ExerciseProgressRangeMode,
+        startEpochDay: Long,
+        endEpochDay: Long
+    ) {
+        val resolvedRange = when (mode) {
+            ExerciseProgressRangeMode.SevenDays,
+            ExerciseProgressRangeMode.ThirtyDays,
+            ExerciseProgressRangeMode.All -> resolveExerciseProgressRange(
+                records = exerciseProgressEntries,
+                mode = mode,
+                currentRange = exerciseProgressRange
+            )
+
+            ExerciseProgressRangeMode.Custom -> resolveClampedExerciseProgressRange(
+                startEpochDay = startEpochDay,
+                endEpochDay = endEpochDay,
+                records = exerciseProgressEntries
+            )
+        }
+        exerciseProgressRangeMode = mode
+        exerciseProgressRange = resolvedRange
     }
 
     LaunchedEffect(exerciseId, exerciseInputType, isEditingEnabled, historyLoaded, setCount) {
@@ -181,6 +246,7 @@ fun ExerciseScreen(
             )
         }
         exerciseProgressEntries = loadedExerciseProgressEntries
+        exerciseProgressRangeMode = ExerciseProgressRangeMode.All
         exerciseProgressRange = resolveExerciseProgressRange(
             records = loadedExerciseProgressEntries,
             mode = ExerciseProgressRangeMode.All,
@@ -195,51 +261,27 @@ fun ExerciseScreen(
                 modifier = Modifier.fillMaxWidth(),
                 tonalElevation = 2.dp
             ) {
-                if (isPullUpsExercise && areAllVisibleSetsCompleted) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                            .heightIn(min = 36.dp),
-                        shape = MaterialTheme.shapes.extraLarge,
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = stringResource(R.string.exercise_completed_label),
-                                maxLines = 1,
-                                softWrap = false,
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        }
-                    }
-                } else {
-                    Button(
-                        onClick = { showFinishExerciseConfirmation = true },
-                        enabled = isEditingEnabled && savingSetNumber == null && !isFinishingAllSets,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                            .heightIn(min = 36.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = 16.dp,
-                            vertical = 4.dp
-                        )
-                    ) {
-                        Text(
-                            text = stringResource(R.string.exercise_finish_all_sets_button),
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
+                Button(
+                    onClick = { showFinishExerciseConfirmation = true },
+                    enabled = isEditingEnabled &&
+                        savingSetNumber == null &&
+                        !isFinishingAllSets &&
+                        !isExerciseCompleted,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .heightIn(min = 36.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 16.dp,
+                        vertical = 4.dp
+                    )
+                ) {
+                    Text(
+                        text = stringResource(R.string.exercise_finish_all_sets_button),
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
         }
@@ -423,8 +465,8 @@ fun ExerciseScreen(
                                                                     setNumber = setState.setNumber
                                                                 )
                                                                 focusManager.clearFocus(force = true)
-                                                                if (completionResult?.isExerciseCompleted == true && !isPullUpsExercise) {
-                                                                    onFinished()
+                                                                if (completionResult?.isExerciseCompleted == true) {
+                                                                    finishExerciseOnce()
                                                                 }
                                                             }.onFailure {
                                                                 Toast.makeText(
@@ -591,12 +633,84 @@ fun ExerciseScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                     ExerciseProgressChartPanel(
-                        entries = exerciseProgressEntries,
+                        entries = filteredExerciseProgressSeries,
                         range = exerciseProgressRange,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(180.dp),
                         onSizeChanged = { _: androidx.compose.ui.unit.IntSize -> }
+                    )
+                    OutlinedButton(
+                        onClick = { openExerciseRangeSheet() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 44.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Text(
+                            text = stringResource(
+                                R.string.exercise_progress_range_label,
+                                exerciseProgressRangeMode.displayLabel(context)
+                            ),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            if (showExerciseRangeSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { showExerciseRangeSheet = false },
+                    sheetState = exerciseRangeSheetState
+                ) {
+                    ExerciseScreenRangeSheet(
+                        selectedMode = exerciseProgressDraftRangeMode,
+                        startEpochDay = exerciseProgressDraftStartEpochDay,
+                        endEpochDay = exerciseProgressDraftEndEpochDay,
+                        dateFormatter = fullDateFormatter,
+                        onPresetSelected = { preset ->
+                            exerciseProgressDraftRangeMode = preset
+                            if (preset != ExerciseProgressRangeMode.Custom) {
+                                val resolvedRange = resolveExerciseProgressRange(
+                                    records = exerciseProgressEntries,
+                                    mode = preset,
+                                    currentRange = exerciseProgressRange
+                                )
+                                exerciseProgressDraftStartEpochDay = resolvedRange.startEpochDay
+                                exerciseProgressDraftEndEpochDay = resolvedRange.endEpochDay
+                            }
+                        },
+                        onStartDateClick = {
+                            exerciseProgressDraftRangeMode = ExerciseProgressRangeMode.Custom
+                            openExerciseDatePicker(
+                                context = context,
+                                initialEpochDay = exerciseProgressDraftStartEpochDay,
+                                onDatePicked = { selectedEpochDay -> 
+                                    exerciseProgressDraftStartEpochDay = selectedEpochDay
+                                }
+                            )
+                        },
+                        onEndDateClick = {
+                            exerciseProgressDraftRangeMode = ExerciseProgressRangeMode.Custom
+                            openExerciseDatePicker(
+                                context = context,
+                                initialEpochDay = exerciseProgressDraftEndEpochDay,
+                                onDatePicked = { selectedEpochDay ->
+                                    exerciseProgressDraftEndEpochDay = selectedEpochDay
+                                }
+                            )
+                        },
+                        onConfirm = {
+                            applyExerciseRangeSelection(
+                                mode = exerciseProgressDraftRangeMode,
+                                startEpochDay = exerciseProgressDraftStartEpochDay,
+                                endEpochDay = exerciseProgressDraftEndEpochDay
+                            )
+                            showExerciseRangeSheet = false
+                        },
+                        onDismiss = { showExerciseRangeSheet = false }
                     )
                 }
             }
@@ -645,9 +759,7 @@ fun ExerciseScreen(
                                                 setNumber = currentSetUiState.set.setNumber
                                             )
                                         }
-                                        if (!isPullUpsExercise) {
-                                            onFinished()
-                                        }
+                                        finishExerciseOnce()
                                     }.onFailure {
                                         Toast.makeText(
                                             context,
@@ -669,6 +781,169 @@ fun ExerciseScreen(
                     }
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ExerciseScreenRangeSheet(
+    selectedMode: ExerciseProgressRangeMode,
+    startEpochDay: Long,
+    endEpochDay: Long,
+    dateFormatter: DateTimeFormatter,
+    onPresetSelected: (ExerciseProgressRangeMode) -> Unit,
+    onStartDateClick: () -> Unit,
+    onEndDateClick: () -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val hasInvalidManualRange = startEpochDay > endEpochDay
+    val selectedRangeLabel = when (selectedMode) {
+        ExerciseProgressRangeMode.SevenDays -> stringResource(R.string.exercise_progress_range_7_days)
+        ExerciseProgressRangeMode.ThirtyDays -> stringResource(R.string.exercise_progress_range_30_days)
+        ExerciseProgressRangeMode.All -> stringResource(R.string.exercise_progress_range_all)
+        ExerciseProgressRangeMode.Custom -> stringResource(R.string.exercise_progress_range_custom)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.exercise_progress_range_title),
+                style = MaterialTheme.typography.titleLarge
+            )
+            Text(
+                text = stringResource(
+                    R.string.exercise_progress_range_selected,
+                    selectedRangeLabel
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ExerciseScreenRangePresetButton(
+                    label = stringResource(R.string.exercise_progress_range_7_days),
+                    selected = selectedMode == ExerciseProgressRangeMode.SevenDays,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onPresetSelected(ExerciseProgressRangeMode.SevenDays) }
+                )
+                ExerciseScreenRangePresetButton(
+                    label = stringResource(R.string.exercise_progress_range_30_days),
+                    selected = selectedMode == ExerciseProgressRangeMode.ThirtyDays,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onPresetSelected(ExerciseProgressRangeMode.ThirtyDays) }
+                )
+                ExerciseScreenRangePresetButton(
+                    label = stringResource(R.string.exercise_progress_range_all),
+                    selected = selectedMode == ExerciseProgressRangeMode.All,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onPresetSelected(ExerciseProgressRangeMode.All) }
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.exercise_progress_range_custom_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = onStartDateClick,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.exercise_progress_range_from,
+                            exerciseScreenSafeLocalDateOfEpochDay(startEpochDay).format(dateFormatter)
+                        )
+                    )
+                }
+                OutlinedButton(
+                    onClick = onEndDateClick,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stringResource(
+                            R.string.exercise_progress_range_to,
+                            exerciseScreenSafeLocalDateOfEpochDay(endEpochDay).format(dateFormatter)
+                        )
+                    )
+                }
+                if (hasInvalidManualRange) {
+                    Text(
+                        text = stringResource(R.string.exercise_progress_range_invalid_note),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(top = 12.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(stringResource(R.string.exercise_progress_range_cancel))
+            }
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(stringResource(R.string.exercise_progress_range_apply))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExerciseScreenRangePresetButton(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    if (selected) {
+        Button(
+            onClick = onClick,
+            modifier = modifier.heightIn(min = 34.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+        ) {
+            Text(label)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier.heightIn(min = 34.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+        ) {
+            Text(label)
         }
     }
 }
@@ -1058,6 +1333,28 @@ private fun PreparedWorkoutSessionSet.zeroedFor(exerciseInputType: ExerciseInput
         ExerciseInputType.REPS -> copy(reps = 0)
         ExerciseInputType.TIME_SECONDS -> copy(additionalValue = 0.0)
     }
+}
+
+private fun openExerciseDatePicker(
+    context: android.content.Context,
+    initialEpochDay: Long,
+    onDatePicked: (Long) -> Unit
+) {
+    val initialDate = exerciseScreenSafeLocalDateOfEpochDay(initialEpochDay)
+    DatePickerDialog(
+        context,
+        { _, year, month, dayOfMonth ->
+            onDatePicked(LocalDate.of(year, month + 1, dayOfMonth).toEpochDay())
+        },
+        initialDate.year,
+        initialDate.monthValue - 1,
+        initialDate.dayOfMonth
+    ).show()
+}
+
+private fun exerciseScreenSafeLocalDateOfEpochDay(epochDay: Long): LocalDate {
+    return runCatching { LocalDate.ofEpochDay(epochDay) }
+        .getOrElse { LocalDate.now() }
 }
 
 
