@@ -24,6 +24,15 @@ interface WorkoutSessionSetDao {
 
     @Query(
         """
+        SELECT COUNT(*)
+        FROM workout_session_sets
+        WHERE exerciseId = :exerciseId
+        """
+    )
+    fun countWorkoutSessionSetsByExerciseId(exerciseId: String): Int
+
+    @Query(
+        """
         DELETE FROM workout_session_sets
         WHERE workoutSessionId = :workoutSessionId
         """

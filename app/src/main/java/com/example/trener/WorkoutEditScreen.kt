@@ -52,6 +52,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun WorkoutEditScreen(
     databaseRefreshToken: Int,
+    programRefreshToken: Int,
     sessionId: Long,
     activeWorkoutSessionId: Long?,
     onSaveSuccess: () -> Unit,
@@ -68,7 +69,13 @@ fun WorkoutEditScreen(
     var loadError by remember { mutableStateOf<String?>(null) }
     var isSaving by remember { mutableStateOf(false) }
 
-    LaunchedEffect(sessionId, activeWorkoutSessionId, databaseRefreshToken, getWorkoutSessionWithSets) {
+    LaunchedEffect(
+        sessionId,
+        activeWorkoutSessionId,
+        databaseRefreshToken,
+        programRefreshToken,
+        getWorkoutSessionWithSets
+    ) {
         isLoading = true
         loadError = null
         editState = null
@@ -270,7 +277,7 @@ fun WorkoutEditScreen(
                                             withContext(Dispatchers.IO) {
                                                 recomputePersistedMaxValues(
                                                     database = database,
-                                                    trainingDay = currentState.session.trainingDay
+                                                    exercises = currentState.exercises
                                                 )
                                             }
                                         }.onSuccess {
@@ -450,6 +457,8 @@ private data class WorkoutEditState(
                             ExerciseInputType.TIME_SECONDS -> set.valueText.takeIf(String::isNotBlank)
                                 ?.toDoubleOrNull()
                         },
+                        parameterValue = set.original?.parameterValue,
+                        parameterOverrideValue = set.original?.parameterOverrideValue,
                         flag = set.original?.flag,
                         note = set.note
                     )
@@ -477,10 +486,16 @@ private fun WorkoutSessionWithSets.toWorkoutEditState(
     context: android.content.Context
 ): WorkoutEditState {
     val setsByExercise = sets.groupBy(WorkoutSessionSetEntity::exerciseId)
+    val exerciseIds = sets.map(WorkoutSessionSetEntity::exerciseId).distinct()
 
     return WorkoutEditState(
         session = session,
-        exercises = getExercisesForDay(session.trainingDay).map { definition ->
+        exercises = exerciseIds.map { exerciseId ->
+            val persistedSetsForExercise = setsByExercise[exerciseId].orEmpty()
+            val definition = resolveWorkoutExerciseDefinitionFromHistory(
+                exerciseId = exerciseId,
+                persistedSets = persistedSetsForExercise
+            )
             val persistedSets = setsByExercise[definition.exerciseId].orEmpty()
                 .associateBy(WorkoutSessionSetEntity::setNumber)
 
@@ -506,13 +521,13 @@ private fun WorkoutSessionWithSets.toWorkoutEditState(
 
 private suspend fun recomputePersistedMaxValues(
     database: com.example.trener.data.local.TrenerDatabase,
-    trainingDay: Int
+    exercises: List<WorkoutEditExerciseState>
 ) {
-    getExercisesForDay(trainingDay).forEach { definition ->
+    exercises.forEach { exercise ->
         loadPersistedMaxValuesBySetNumber(
             database = database,
-            exerciseId = definition.exerciseId,
-            exerciseInputType = definition.inputType
+            exerciseId = exercise.exerciseId,
+            exerciseInputType = exercise.inputType
         )
     }
 }

@@ -59,12 +59,13 @@ private enum class ComparisonMetricMode {
 @Composable
 fun ExerciseComparisonScreen(
     databaseRefreshToken: Int,
+    programRefreshToken: Int,
     historyRefreshToken: Int,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current.applicationContext
     val database = rememberTrenerDatabase(databaseRefreshToken)
-    val allExercises = remember { getAllExercises() }
+    val allExercises = remember(programRefreshToken) { getAllExercises() }
     val defaultExerciseA = remember(allExercises) {
         allExercises.firstOrNull()?.exerciseId.orEmpty()
     }
@@ -74,10 +75,15 @@ fun ExerciseComparisonScreen(
     var comparisonMetricMode by rememberSaveable {
         mutableStateOf(ComparisonMetricMode.ExerciseComparison)
     }
+    var exerciseComparisonMetric by rememberSaveable {
+        mutableStateOf(defaultExerciseAnalyticsMetric)
+    }
     var selectedExerciseA by rememberSaveable { mutableStateOf(defaultExerciseA) }
     var selectedExerciseB by rememberSaveable { mutableStateOf(defaultExerciseB) }
     var exerciseProgressEntriesA by remember { mutableStateOf<List<ExerciseProgressPoint>>(emptyList()) }
     var exerciseProgressEntriesB by remember { mutableStateOf<List<ExerciseProgressPoint>>(emptyList()) }
+    var exerciseParameterProgressEntriesA by remember { mutableStateOf<List<ComparisonSeriesPoint>>(emptyList()) }
+    var exerciseParameterProgressEntriesB by remember { mutableStateOf<List<ComparisonSeriesPoint>>(emptyList()) }
     var trainingDurationEntries by remember { mutableStateOf<List<WorkoutDurationPoint>>(emptyList()) }
 
     var syncRanges by rememberSaveable { mutableStateOf(false) }
@@ -175,11 +181,69 @@ fun ExerciseComparisonScreen(
     val selectedExerciseLabelB = remember(selectedExerciseB, context) {
         getExerciseLabel(context, selectedExerciseB)
     }
-    val exerciseComparisonSeriesA = remember(exerciseProgressEntriesA) {
+    val selectedExerciseDefinitionA = remember(selectedExerciseA, programRefreshToken, allExercises) {
+        allExercises.firstOrNull { exercise -> exercise.exerciseId == selectedExerciseA }
+            ?: getExerciseDefinition(selectedExerciseA)
+    }
+    val selectedExerciseDefinitionB = remember(selectedExerciseB, programRefreshToken, allExercises) {
+        allExercises.firstOrNull { exercise -> exercise.exerciseId == selectedExerciseB }
+            ?: getExerciseDefinition(selectedExerciseB)
+    }
+    val selectedExerciseParameterTypeA = remember(selectedExerciseDefinitionA) {
+        selectedExerciseDefinitionA?.parameterType?.trim().orEmpty()
+    }
+    val selectedExerciseParameterTypeB = remember(selectedExerciseDefinitionB) {
+        selectedExerciseDefinitionB?.parameterType?.trim().orEmpty()
+    }
+    val selectedExerciseParameterLabelA = remember(selectedExerciseDefinitionA, context) {
+        selectedExerciseDefinitionA?.parameterLabel
+            ?.trim()
+            .takeIf { !it.isNullOrBlank() }
+            ?: context.getString(R.string.exercise_parameter_fallback_label)
+    }
+    val selectedExerciseParameterLabelB = remember(selectedExerciseDefinitionB, context) {
+        selectedExerciseDefinitionB?.parameterLabel
+            ?.trim()
+            .takeIf { !it.isNullOrBlank() }
+            ?: context.getString(R.string.exercise_parameter_fallback_label)
+    }
+    val selectedExerciseParameterUnitA = remember(selectedExerciseDefinitionA) {
+        selectedExerciseDefinitionA?.parameterUnit?.trim().orEmpty()
+    }
+    val selectedExerciseParameterUnitB = remember(selectedExerciseDefinitionB) {
+        selectedExerciseDefinitionB?.parameterUnit?.trim().orEmpty()
+    }
+    val exerciseRepetitionSeriesA = remember(exerciseProgressEntriesA) {
         exerciseProgressEntriesA.map(ExerciseProgressPoint::toComparisonSeriesPoint)
     }
-    val exerciseComparisonSeriesB = remember(exerciseProgressEntriesB) {
+    val exerciseRepetitionSeriesB = remember(exerciseProgressEntriesB) {
         exerciseProgressEntriesB.map(ExerciseProgressPoint::toComparisonSeriesPoint)
+    }
+    val exerciseParameterSeriesA = remember(exerciseParameterProgressEntriesA) {
+        exerciseParameterProgressEntriesA
+    }
+    val exerciseParameterSeriesB = remember(exerciseParameterProgressEntriesB) {
+        exerciseParameterProgressEntriesB
+    }
+    val exerciseComparisonSeriesA = remember(
+        exerciseComparisonMetric,
+        exerciseRepetitionSeriesA,
+        exerciseParameterSeriesA
+    ) {
+        when (exerciseComparisonMetric) {
+            ExerciseAnalyticsMetric.Repetitions -> exerciseRepetitionSeriesA
+            ExerciseAnalyticsMetric.Parameter -> exerciseParameterSeriesA
+        }
+    }
+    val exerciseComparisonSeriesB = remember(
+        exerciseComparisonMetric,
+        exerciseRepetitionSeriesB,
+        exerciseParameterSeriesB
+    ) {
+        when (exerciseComparisonMetric) {
+            ExerciseAnalyticsMetric.Repetitions -> exerciseRepetitionSeriesB
+            ExerciseAnalyticsMetric.Parameter -> exerciseParameterSeriesB
+        }
     }
     val combinedSeriesRecords = remember(exerciseComparisonSeriesA, exerciseComparisonSeriesB) {
         (exerciseComparisonSeriesA + exerciseComparisonSeriesB)
@@ -198,6 +262,71 @@ fun ExerciseComparisonScreen(
             point.entryDateEpochDay in visibleRangeB.startEpochDay..visibleRangeB.endEpochDay
         }
     }
+    val hasParameterAnalyticsA = remember(
+        selectedExerciseParameterTypeA,
+        exerciseParameterSeriesA
+    ) {
+        selectedExerciseParameterTypeA.isNotBlank() || exerciseParameterSeriesA.isNotEmpty()
+    }
+    val hasParameterAnalyticsB = remember(
+        selectedExerciseParameterTypeB,
+        exerciseParameterSeriesB
+    ) {
+        selectedExerciseParameterTypeB.isNotBlank() || exerciseParameterSeriesB.isNotEmpty()
+    }
+    val hasComparisonParameterAnalytics = hasParameterAnalyticsA && hasParameterAnalyticsB
+    val exerciseComparisonValueFormatterA = remember(
+        exerciseComparisonMetric,
+        selectedExerciseParameterUnitA
+    ) {
+        when (exerciseComparisonMetric) {
+            ExerciseAnalyticsMetric.Repetitions -> ::formatExerciseAxisLabel
+            ExerciseAnalyticsMetric.Parameter -> { value: Double, step: Double ->
+                formatComparisonParameterAxisLabel(
+                    value = value,
+                    step = step,
+                    unit = selectedExerciseParameterUnitA
+                )
+            }
+        }
+    }
+    val exerciseComparisonValueFormatterB = remember(
+        exerciseComparisonMetric,
+        selectedExerciseParameterUnitB
+    ) {
+        when (exerciseComparisonMetric) {
+            ExerciseAnalyticsMetric.Repetitions -> ::formatExerciseAxisLabel
+            ExerciseAnalyticsMetric.Parameter -> { value: Double, step: Double ->
+                formatComparisonParameterAxisLabel(
+                    value = value,
+                    step = step,
+                    unit = selectedExerciseParameterUnitB
+                )
+            }
+        }
+    }
+    val exerciseComparisonChartTitleA = remember(
+        exerciseComparisonMetric,
+        selectedExerciseLabelA,
+        selectedExerciseParameterLabelA
+    ) {
+        if (exerciseComparisonMetric == ExerciseAnalyticsMetric.Parameter) {
+            "$selectedExerciseLabelA · $selectedExerciseParameterLabelA"
+        } else {
+            selectedExerciseLabelA
+        }
+    }
+    val exerciseComparisonChartTitleB = remember(
+        exerciseComparisonMetric,
+        selectedExerciseLabelB,
+        selectedExerciseParameterLabelB
+    ) {
+        if (exerciseComparisonMetric == ExerciseAnalyticsMetric.Parameter) {
+            "$selectedExerciseLabelB · $selectedExerciseParameterLabelB"
+        } else {
+            selectedExerciseLabelB
+        }
+    }
     val durationVisibleRange = remember(durationRangeStartEpochDay, durationRangeEndEpochDay) {
         ExerciseProgressRange(
             startEpochDay = durationRangeStartEpochDay,
@@ -207,6 +336,27 @@ fun ExerciseComparisonScreen(
     val filteredDurationSeries = remember(trainingDurationSeries, durationVisibleRange) {
         trainingDurationSeries.filter { point ->
             point.entryDateEpochDay in durationVisibleRange.startEpochDay..durationVisibleRange.endEpochDay
+        }
+    }
+
+    LaunchedEffect(allExercises, programRefreshToken) {
+        val availableExerciseIds = allExercises.map(WorkoutProgramExerciseDefinition::exerciseId).toSet()
+        if (availableExerciseIds.isEmpty()) {
+            selectedExerciseA = defaultExerciseA
+            selectedExerciseB = defaultExerciseB
+            return@LaunchedEffect
+        }
+
+        if (selectedExerciseA !in availableExerciseIds) {
+            selectedExerciseA = defaultExerciseA
+        }
+
+        val fallbackExerciseB = allExercises.firstOrNull { exercise ->
+            exercise.exerciseId != selectedExerciseA
+        }?.exerciseId ?: selectedExerciseA
+
+        if (selectedExerciseB !in availableExerciseIds || selectedExerciseB == selectedExerciseA) {
+            selectedExerciseB = fallbackExerciseB
         }
     }
 
@@ -286,6 +436,24 @@ fun ExerciseComparisonScreen(
         }
     }
 
+    LaunchedEffect(selectedExerciseA, databaseRefreshToken, historyRefreshToken) {
+        exerciseParameterProgressEntriesA = withContext(Dispatchers.IO) {
+            loadExerciseParameterProgressEntries(
+                database = database,
+                exerciseId = selectedExerciseA
+            )
+        }
+    }
+
+    LaunchedEffect(selectedExerciseB, databaseRefreshToken, historyRefreshToken) {
+        exerciseParameterProgressEntriesB = withContext(Dispatchers.IO) {
+            loadExerciseParameterProgressEntries(
+                database = database,
+                exerciseId = selectedExerciseB
+            )
+        }
+    }
+
     LaunchedEffect(databaseRefreshToken, historyRefreshToken) {
         trainingDurationEntries = withContext(Dispatchers.IO) {
             loadWorkoutDurationEntries(database)
@@ -342,6 +510,14 @@ fun ExerciseComparisonScreen(
         hasInitializedDurationRange = true
     }
 
+    LaunchedEffect(hasComparisonParameterAnalytics, exerciseComparisonMetric) {
+        if (!hasComparisonParameterAnalytics &&
+            exerciseComparisonMetric == ExerciseAnalyticsMetric.Parameter
+        ) {
+            exerciseComparisonMetric = ExerciseAnalyticsMetric.Repetitions
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -387,6 +563,30 @@ fun ExerciseComparisonScreen(
             }
 
             if (comparisonMetricMode == ComparisonMetricMode.ExerciseComparison) {
+                if (hasComparisonParameterAnalytics) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ExerciseSelectorButton(
+                            label = stringResource(R.string.exercise_progress_metric_repetitions),
+                            selected = exerciseComparisonMetric == ExerciseAnalyticsMetric.Repetitions,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                exerciseComparisonMetric = ExerciseAnalyticsMetric.Repetitions
+                            }
+                        )
+                        ExerciseSelectorButton(
+                            label = stringResource(R.string.exercise_progress_metric_parameter),
+                            selected = exerciseComparisonMetric == ExerciseAnalyticsMetric.Parameter,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                exerciseComparisonMetric = ExerciseAnalyticsMetric.Parameter
+                            }
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -486,11 +686,12 @@ fun ExerciseComparisonScreen(
                                 )
                             }
                             ComparisonChartPanel(
-                                title = selectedExerciseLabelA,
+                                title = exerciseComparisonChartTitleA,
                                 entries = filteredSeriesA,
                                 range = visibleRangeA,
                                 gestureRecords = if (syncRanges) combinedSeriesRecords else exerciseComparisonSeriesA,
                                 gestureRange = visibleRangeA,
+                                valueLabelFormatter = exerciseComparisonValueFormatterA,
                                 onRangeChanged = { range ->
                                     if (syncRanges) {
                                         updateSyncedRange(ExerciseProgressRangeMode.Custom, range)
@@ -518,11 +719,12 @@ fun ExerciseComparisonScreen(
                                 )
                             }
                             ComparisonChartPanel(
-                                title = selectedExerciseLabelB,
+                                title = exerciseComparisonChartTitleB,
                                 entries = filteredSeriesB,
                                 range = visibleRangeB,
                                 gestureRecords = if (syncRanges) combinedSeriesRecords else exerciseComparisonSeriesB,
                                 gestureRange = visibleRangeB,
+                                valueLabelFormatter = exerciseComparisonValueFormatterB,
                                 onRangeChanged = { range ->
                                     if (syncRanges) {
                                         updateSyncedRange(ExerciseProgressRangeMode.Custom, range)
@@ -550,11 +752,12 @@ fun ExerciseComparisonScreen(
                                 )
                             }
                             ComparisonChartPanel(
-                                title = selectedExerciseLabelA,
+                                title = exerciseComparisonChartTitleA,
                                 entries = filteredSeriesA,
                                 range = visibleRangeA,
                                 gestureRecords = if (syncRanges) combinedSeriesRecords else exerciseComparisonSeriesA,
                                 gestureRange = visibleRangeA,
+                                valueLabelFormatter = exerciseComparisonValueFormatterA,
                                 onRangeChanged = { range ->
                                     if (syncRanges) {
                                         updateSyncedRange(ExerciseProgressRangeMode.Custom, range)
@@ -579,11 +782,12 @@ fun ExerciseComparisonScreen(
                                 )
                             }
                             ComparisonChartPanel(
-                                title = selectedExerciseLabelB,
+                                title = exerciseComparisonChartTitleB,
                                 entries = filteredSeriesB,
                                 range = visibleRangeB,
                                 gestureRecords = if (syncRanges) combinedSeriesRecords else exerciseComparisonSeriesB,
                                 gestureRange = visibleRangeB,
+                                valueLabelFormatter = exerciseComparisonValueFormatterB,
                                 onRangeChanged = { range ->
                                     if (syncRanges) {
                                         updateSyncedRange(ExerciseProgressRangeMode.Custom, range)
@@ -865,11 +1069,25 @@ private fun resolveComparisonRangeSelection(
     }
 }
 
+private fun formatComparisonParameterAxisLabel(
+    value: Double,
+    step: Double,
+    unit: String
+): String {
+    return buildString {
+        append(formatExerciseAxisLabel(value, step))
+        if (unit.isNotBlank()) {
+            append(' ')
+            append(unit)
+        }
+    }
+}
+
 @Composable
 private fun ExerciseComparisonSelectorSheet(
     title: String,
     selectedExerciseId: String,
-    exercises: List<ExerciseDefinition>,
+    exercises: List<WorkoutProgramExerciseDefinition>,
     onExerciseSelected: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -885,7 +1103,11 @@ private fun ExerciseComparisonSelectorSheet(
 
         exercises.forEach { exercise ->
             ExerciseSelectorButton(
-                label = getExerciseLabel(context, exercise.exerciseId),
+                label = getExerciseLabel(
+                    context,
+                    exercise.exerciseId,
+                    preferredDefinitions = listOf(exercise)
+                ),
                 selected = exercise.exerciseId == selectedExerciseId,
                 modifier = Modifier.fillMaxWidth(),
                 onClick = { onExerciseSelected(exercise.exerciseId) }

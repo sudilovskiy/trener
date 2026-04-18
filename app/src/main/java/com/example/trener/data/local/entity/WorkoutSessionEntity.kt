@@ -10,5 +10,7 @@ data class WorkoutSessionEntity(
     val trainingDay: Int,
     val startTimestampEpochMillis: Long,
     val endTimestampEpochMillis: Long? = null,
-    val durationSeconds: Long? = null
+    val durationSeconds: Long? = null,
+    val averageHeartRate: Int? = null,
+    val maxHeartRate: Int? = null
 )

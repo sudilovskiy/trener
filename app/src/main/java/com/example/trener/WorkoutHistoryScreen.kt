@@ -47,6 +47,7 @@ import java.time.LocalDate
 @Composable
 fun WorkoutHistoryScreen(
     databaseRefreshToken: Int,
+    programRefreshToken: Int,
     refreshToken: Int,
     dateFilterEpochDay: Long? = null,
     sessionUiState: WorkoutSessionUiState,
@@ -65,7 +66,13 @@ fun WorkoutHistoryScreen(
     var showRestoreConfirmation by remember { mutableStateOf(false) }
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
 
-    LaunchedEffect(database, refreshToken, databaseRefreshToken, dateFilterEpochDay) {
+    LaunchedEffect(
+        database,
+        refreshToken,
+        databaseRefreshToken,
+        programRefreshToken,
+        dateFilterEpochDay
+    ) {
         isLoading = true
         loadError = null
 

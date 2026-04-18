@@ -39,7 +39,15 @@ fun WorkoutSessionEntity.toWorkoutLocalDate(): LocalDate {
         .toLocalDate()
 }
 
-fun buildWorkoutSetValuesText(context: Context, set: WorkoutSessionSetEntity): String {
+fun buildWorkoutSetValuesText(
+    context: Context,
+    exerciseDefinition: WorkoutProgramExerciseDefinition,
+    set: WorkoutSessionSetEntity
+): String {
+    val parameterLabel = exerciseDefinition.parameterLabel
+        .trim()
+        .ifBlank { context.getString(R.string.exercise_parameter_fallback_label) }
+    val parameterUnit = exerciseDefinition.parameterUnit.trim()
     val values = buildList {
         set.reps?.let { add(context.getString(R.string.set_value_reps, it)) }
         set.weight?.let { add(context.getString(R.string.set_value_weight, it.toDisplayString())) }
@@ -51,6 +59,24 @@ fun buildWorkoutSetValuesText(context: Context, set: WorkoutSessionSetEntity): S
                 context.getString(
                     R.string.set_value_flag,
                     context.getString(if (it) R.string.flag_yes else R.string.flag_no)
+                )
+            )
+        }
+        set.parameterValue?.let {
+            add(
+                context.getString(
+                    R.string.set_value_parameter,
+                    parameterLabel,
+                    formatParameterValueText(it, parameterUnit)
+                )
+            )
+        }
+        set.parameterOverrideValue?.let {
+            add(
+                context.getString(
+                    R.string.set_value_parameter_override,
+                    parameterLabel,
+                    formatParameterValueText(it, parameterUnit)
                 )
             )
         }
@@ -114,5 +140,15 @@ private fun Double.toDisplayString(): String {
         integerValue.toString()
     } else {
         toString()
+    }
+}
+
+private fun formatParameterValueText(value: Double, unit: String): String {
+    return buildString {
+        append(value.toDisplayString())
+        if (unit.isNotBlank()) {
+            append(' ')
+            append(unit)
+        }
     }
 }

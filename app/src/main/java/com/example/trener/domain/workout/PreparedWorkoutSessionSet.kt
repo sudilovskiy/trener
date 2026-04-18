@@ -6,6 +6,8 @@ data class PreparedWorkoutSessionSet(
     val reps: Int? = null,
     val weight: Double? = null,
     val additionalValue: Double? = null,
+    val parameterValue: Double? = null,
+    val parameterOverrideValue: Double? = null,
     val flag: Boolean? = null,
     val note: String = ""
 )

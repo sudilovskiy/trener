@@ -33,6 +33,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.trener.healthconnect.HealthConnectWeightImportService
 import com.example.trener.ble.BleEntryScreen
+import com.example.trener.data.local.WorkoutHeartRateRepository
+import com.example.trener.domain.workout.ReplaceWorkoutSessionSets
+import com.example.trener.domain.workout.toWorkoutSessionSetEntity
 import com.example.trener.ui.navigation.AppRoute
 import com.example.trener.ui.navigation.getNextTrainingDay
 import kotlinx.coroutines.Dispatchers
@@ -42,11 +45,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.example.trener.music.MusicPlayerViewModel
+import com.example.trener.data.local.TrainingProgramBootstrapper
+import com.example.trener.data.local.TrainingProgramRepository
+import com.example.trener.WorkoutProgramCache
+import com.example.trener.getWorkoutProgramDays
 
 @Composable
 fun TrenerApp() {
     val currentContext = LocalContext.current
     val context = currentContext.applicationContext
+    val application = context as TrenerApplication
     val activity = currentContext as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
@@ -56,15 +65,28 @@ fun TrenerApp() {
     var lastCompletedTrainingDay by remember { mutableStateOf<Int?>(null) }
     var completedHistoryRefreshToken by remember { mutableIntStateOf(0) }
     var workoutDetailRefreshToken by remember { mutableIntStateOf(0) }
+    var programRefreshToken by remember { mutableIntStateOf(0) }
     var healthConnectWeightImportInFlight by remember { mutableStateOf(false) }
     var showExitConfirmation by rememberSaveable { mutableStateOf(false) }
     var shouldExitAfterWorkoutSave by rememberSaveable { mutableStateOf(false) }
     val sessionUiState: WorkoutSessionUiState = viewModel()
+    val musicPlayerViewModel: MusicPlayerViewModel = viewModel()
+    val musicPlaybackState by musicPlayerViewModel.playbackState.collectAsState()
+    val heartRateRuntimeState by application.heartRateRuntimeCoordinator.state.collectAsState()
+    val heartRateBleState by application.heartRateBleService.state.collectAsState()
     val database = rememberTrenerDatabase(databaseRefreshToken)
+    val workoutHeartRateRepository = remember(database) {
+        WorkoutHeartRateRepository(database)
+    }
+    val workoutProgramRepository = remember(database) { TrainingProgramRepository(database) }
     val view = LocalView.current
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
     val shouldInterceptExit = currentRoute == AppRoute.Overview && sessionUiState.hasActiveWorkout()
+    val updateHeartRateThreshold: (Int?) -> Unit = { thresholdBpm ->
+        application.heartRateSettingsStore.setGlobalHeartRateThresholdBpm(thresholdBpm)
+        application.heartRateRuntimeCoordinator.configureThreshold(thresholdBpm)
+    }
 
     fun requestHealthConnectWeightImport() {
         if (currentRoute != AppRoute.Overview || healthConnectWeightImportInFlight) {
@@ -92,6 +114,35 @@ fun TrenerApp() {
         }
     }
 
+    LaunchedEffect(database, databaseRefreshToken) {
+        withContext(Dispatchers.IO) {
+            TrainingProgramBootstrapper.ensureBootstrapped(context, database)
+            WorkoutProgramCache.updateSnapshot(
+                workoutProgramRepository.getWorkoutProgramSnapshot()
+            )
+        }
+        programRefreshToken++
+    }
+
+    val availableWorkoutDayNumbers = remember(programRefreshToken) {
+        getWorkoutProgramDays().map { day -> day.runtimeDayNumber }
+    }
+    val highlightedTrainingDay = remember(
+        lastCompletedTrainingDay,
+        programRefreshToken,
+        availableWorkoutDayNumbers
+    ) {
+        getNextTrainingDay(lastCompletedTrainingDay, availableWorkoutDayNumbers)
+    }
+
+    LaunchedEffect(programRefreshToken) {
+        if (availableWorkoutDayNumbers.isNotEmpty() &&
+            selectedTrainingDay !in availableWorkoutDayNumbers
+        ) {
+            selectedTrainingDay = availableWorkoutDayNumbers.first()
+        }
+    }
+
     LaunchedEffect(currentRoute) {
         if (currentRoute == AppRoute.Overview) {
             requestHealthConnectWeightImport()
@@ -111,28 +162,65 @@ fun TrenerApp() {
         }
     }
 
+    DisposableEffect(lifecycleOwner, musicPlayerViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                musicPlayerViewModel.pausePlayback()
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     LaunchedEffect(sessionUiState.pendingFinishTrigger, sessionUiState.activeWorkout) {
         val finishRequest = sessionUiState.beginFinishingWorkout() ?: return@LaunchedEffect
+        val replaceWorkoutSessionSets = ReplaceWorkoutSessionSets(database)
+        val hasMeaningfulCompletedSet = sessionUiState.hasMeaningfulCompletedWorkoutSet()
+        application.heartRateRuntimeCoordinator.beginFinalizingWorkoutSession(
+            finishRequest.sessionId
+        )
 
         runCatching {
             withContext(Dispatchers.IO) {
-                database.workoutSessionDao().finishWorkoutSession(
-                    sessionId = finishRequest.sessionId,
-                    endTimestampEpochMillis = System.currentTimeMillis(),
-                    durationSeconds = (
-                        (System.currentTimeMillis() - finishRequest.startedAtMillis) / 1000L
-                    ).coerceAtLeast(0L)
-                )
+                if (hasMeaningfulCompletedSet) {
+                    persistActiveWorkoutSessionSets(
+                        replaceWorkoutSessionSets = replaceWorkoutSessionSets,
+                        sessionUiState = sessionUiState
+                    )
+                    database.workoutSessionDao().finishWorkoutSession(
+                        sessionId = finishRequest.sessionId,
+                        endTimestampEpochMillis = System.currentTimeMillis(),
+                        durationSeconds = (
+                            (System.currentTimeMillis() - finishRequest.startedAtMillis) / 1000L
+                        ).coerceAtLeast(0L)
+                    )
+                    workoutHeartRateRepository.recalculateWorkoutSessionHeartRateAggregates(
+                        finishRequest.sessionId
+                    )
+                } else {
+                    database.workoutSessionDao().deleteWorkoutSession(finishRequest.sessionId)
+                }
             }
         }.onSuccess {
+            application.heartRateRuntimeCoordinator.clearWorkoutSessionBinding(
+                finishRequest.sessionId
+            )
             sessionUiState.completeWorkoutSaveSuccessfully()
-            completedHistoryRefreshToken++
+            if (hasMeaningfulCompletedSet) {
+                completedHistoryRefreshToken++
+            }
             if (shouldExitAfterWorkoutSave) {
                 shouldExitAfterWorkoutSave = false
                 activity?.finish()
             }
         }.onFailure { throwable ->
             Log.e(logTag, "Failed to save workout session", throwable)
+            application.heartRateRuntimeCoordinator.restoreActiveWorkoutSessionBinding(
+                finishRequest.sessionId
+            )
             sessionUiState.failWorkoutSave()
             shouldExitAfterWorkoutSave = false
         }
@@ -162,18 +250,29 @@ fun TrenerApp() {
                 composable(AppRoute.Overview) {
                     OverviewScreen(
                         activeWorkout = sessionUiState.activeWorkout,
-                        highlightedTrainingDay = lastCompletedTrainingDay?.let { lastCompletedDay ->
-                            getNextTrainingDay(lastCompletedDay)
-                        },
+                        highlightedTrainingDay = highlightedTrainingDay,
                         databaseRefreshToken = databaseRefreshToken,
+                        programRefreshToken = programRefreshToken,
                         historyRefreshToken = completedHistoryRefreshToken,
+                        musicPlaybackState = musicPlaybackState,
+                        heartRateState = heartRateRuntimeState,
+                        heartRateBleState = heartRateBleState,
+                        onMusicPreviousClick = musicPlayerViewModel::previousTrack,
+                        onMusicPlayPauseClick = musicPlayerViewModel::playPause,
+                        onMusicNextClick = musicPlayerViewModel::nextTrack,
+                        onHeartRateReconnect = application.heartRateBleService::reconnectNow,
+                        onHeartRateSelectTargetDevice = application.heartRateBleService::selectTargetDevice,
+                        onHeartRateThresholdChange = updateHeartRateThreshold,
                         onBleEntryClick = {
                             navController.navigate(AppRoute.BleEntry)
                         },
                         onExerciseComparisonClick = {
                             navController.navigate(AppRoute.ExerciseComparison)
                         },
-                        onTrainingDayClick = { trainingDay ->
+                        onTrainingDaysBuilderClick = {
+                            navController.navigate(AppRoute.TrainingDaysBuilder)
+                        },
+                        onTrainingDayClick = { trainingDay -> 
                             val activeWorkout = sessionUiState.activeWorkout
                             if (activeWorkout != null && activeWorkout.trainingDay != trainingDay) {
                                 Toast.makeText(
@@ -198,16 +297,62 @@ fun TrenerApp() {
                 composable(AppRoute.Workout) {
                     WorkoutScreen(
                         databaseRefreshToken = databaseRefreshToken,
+                        programRefreshToken = programRefreshToken,
                         trainingDay = selectedTrainingDay,
                         sessionUiState = sessionUiState,
+                        heartRateState = heartRateRuntimeState,
+                        heartRateBleState = heartRateBleState,
+                        onHeartRateReconnect = application.heartRateBleService::reconnectNow,
+                        onHeartRateSelectTargetDevice = application.heartRateBleService::selectTargetDevice,
                         onExerciseClick = { exerciseId ->
                             navController.navigate(AppRoute.exercise(exerciseId))
+                        }
+                    )
+                }
+                composable(AppRoute.TrainingDaysBuilder) {
+                    TrainingDaysBuilderScreen(
+                        databaseRefreshToken = databaseRefreshToken,
+                        onManageExercises = { trainingDayId ->
+                            navController.navigate(AppRoute.trainingDayExercises(trainingDayId))
+                        },
+                        onManageCatalog = {
+                            navController.navigate(AppRoute.exerciseCatalog())
+                        },
+                        onBack = {
+                            navController.popBackStack()
+                        }
+                    )
+                }
+                composable(
+                    route = AppRoute.TrainingDayExercises,
+                    arguments = listOf(
+                        navArgument(AppRoute.TrainingDayIdArg) {
+                            type = NavType.LongType
+                        }
+                    )
+                ) { backStackEntry ->
+                    TrainingDayExercisesScreen(
+                        trainingDayId = backStackEntry.arguments
+                            ?.getLong(AppRoute.TrainingDayIdArg)
+                            ?: -1L,
+                        databaseRefreshToken = databaseRefreshToken,
+                        onBack = {
+                            navController.popBackStack()
+                        }
+                    )
+                }
+                composable(AppRoute.ExerciseCatalog) {
+                    ExerciseCatalogManagementScreen(
+                        databaseRefreshToken = databaseRefreshToken,
+                        onBack = {
+                            navController.popBackStack()
                         }
                     )
                 }
                 composable(AppRoute.History) {
                     WorkoutHistoryScreen(
                         databaseRefreshToken = databaseRefreshToken,
+                        programRefreshToken = programRefreshToken,
                         refreshToken = completedHistoryRefreshToken,
                         dateFilterEpochDay = null,
                         sessionUiState = sessionUiState,
@@ -231,6 +376,7 @@ fun TrenerApp() {
                 ) { backStackEntry ->
                     WorkoutHistoryScreen(
                         databaseRefreshToken = databaseRefreshToken,
+                        programRefreshToken = programRefreshToken,
                         refreshToken = completedHistoryRefreshToken,
                         dateFilterEpochDay = backStackEntry.arguments
                             ?.getLong(AppRoute.DateEpochDayArg),
@@ -255,6 +401,7 @@ fun TrenerApp() {
                 ) { backStackEntry ->
                     WorkoutDetailScreen(
                         databaseRefreshToken = databaseRefreshToken,
+                        programRefreshToken = programRefreshToken,
                         sessionId = backStackEntry.arguments?.getLong(AppRoute.SessionIdArg) ?: -1L,
                         activeWorkoutSessionId = sessionUiState.activeWorkout?.sessionId,
                         refreshToken = workoutDetailRefreshToken,
@@ -281,6 +428,7 @@ fun TrenerApp() {
                 ) { backStackEntry ->
                     WorkoutEditScreen(
                         databaseRefreshToken = databaseRefreshToken,
+                        programRefreshToken = programRefreshToken,
                         sessionId = backStackEntry.arguments?.getLong(AppRoute.SessionIdArg) ?: -1L,
                         activeWorkoutSessionId = sessionUiState.activeWorkout?.sessionId,
                         onSaveSuccess = {
@@ -306,8 +454,13 @@ fun TrenerApp() {
                             ?.getString(AppRoute.ExerciseIdArg)
                             .orEmpty(),
                         databaseRefreshToken = databaseRefreshToken,
+                        programRefreshToken = programRefreshToken,
                         historyRefreshToken = completedHistoryRefreshToken,
                         sessionUiState = sessionUiState,
+                        heartRateState = heartRateRuntimeState,
+                        heartRateBleState = heartRateBleState,
+                        onHeartRateReconnect = application.heartRateBleService::reconnectNow,
+                        onHeartRateSelectTargetDevice = application.heartRateBleService::selectTargetDevice,
                         onFinished = {
                             navController.popBackStack()
                         }
@@ -316,6 +469,7 @@ fun TrenerApp() {
                 composable(AppRoute.ExerciseComparison) {
                     ExerciseComparisonScreen(
                         databaseRefreshToken = databaseRefreshToken,
+                        programRefreshToken = programRefreshToken,
                         historyRefreshToken = completedHistoryRefreshToken,
                         onBack = {
                             navController.popBackStack()
@@ -356,4 +510,36 @@ fun TrenerApp() {
             }
         }
     }
+}
+
+private suspend fun persistActiveWorkoutSessionSets(
+    replaceWorkoutSessionSets: ReplaceWorkoutSessionSets,
+    sessionUiState: WorkoutSessionUiState
+) {
+    val activeWorkout = sessionUiState.activeWorkout ?: return
+    val persistedSets = activeWorkout.exerciseDefinitions.flatMap { definition ->
+        sessionUiState.getExerciseSetUiStates(
+            exerciseId = definition.exerciseId,
+            setCount = sessionUiState.getRequiredSetCount(definition.exerciseId)
+        ).filter { setUiState ->
+            setUiState.isCompleted ||
+                hasWorkoutSetContent(setUiState.set) ||
+                setUiState.set.note.isNotBlank()
+        }.map { setUiState ->
+            setUiState.set.toWorkoutSessionSetEntity(activeWorkout.sessionId)
+        }
+    }
+
+    replaceWorkoutSessionSets(
+        workoutSessionId = activeWorkout.sessionId,
+        sets = persistedSets
+    )
+}
+
+private fun hasWorkoutSetContent(set: com.example.trener.domain.workout.PreparedWorkoutSessionSet): Boolean {
+    return set.reps != null ||
+        set.weight != null ||
+        set.additionalValue != null ||
+        set.parameterValue != null ||
+        set.parameterOverrideValue != null
 }

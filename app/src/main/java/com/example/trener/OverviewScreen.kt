@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.mandatorySystemGesturesPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,6 +34,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -41,6 +44,12 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,10 +79,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.material.icons.filled.Settings
 import com.example.trener.normalizedWeight
+import com.example.trener.ble.heartrate.HeartRateBleSourceState
 import com.example.trener.data.local.BodyWeightHistoryRepository
 import com.example.trener.data.local.entity.BodyWeightEntryEntity
 import com.example.trener.data.local.entity.WorkoutSessionEntity
+import com.example.trener.domain.heartrate.HeartRateRuntimeState
+import com.example.trener.music.MusicPlaybackState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,9 +128,20 @@ fun OverviewScreen(
     activeWorkout: ActiveWorkoutState?,
     highlightedTrainingDay: Int?,
     databaseRefreshToken: Int,
+    programRefreshToken: Int,
     historyRefreshToken: Int,
+    musicPlaybackState: MusicPlaybackState,
+    heartRateState: HeartRateRuntimeState,
+    heartRateBleState: HeartRateBleSourceState? = null,
+    onMusicPreviousClick: () -> Unit,
+    onMusicPlayPauseClick: () -> Unit,
+    onMusicNextClick: () -> Unit,
+    onHeartRateReconnect: () -> Unit,
+    onHeartRateSelectTargetDevice: ((String) -> Unit)? = null,
+    onHeartRateThresholdChange: (Int?) -> Unit,
     onBleEntryClick: () -> Unit,
     onExerciseComparisonClick: () -> Unit,
+    onTrainingDaysBuilderClick: () -> Unit,
     onTrainingDayClick: (Int) -> Unit,
     onHistoryClick: () -> Unit,
     onHistoryDateClick: (Long) -> Unit
@@ -128,7 +152,7 @@ fun OverviewScreen(
         BodyWeightHistoryRepository(database)
     }
     val coroutineScope = rememberCoroutineScope()
-    val trainingDays = listOf(1, 2, 3)
+    val trainingDays = remember(programRefreshToken) { getWorkoutProgramDays() }
     val activeTrainingDay = activeWorkout?.trainingDay
     var visibleMonthOffset by rememberSaveable { mutableIntStateOf(0) }
     var workoutsByEpochDay by remember { mutableStateOf<Map<Long, List<WorkoutSessionEntity>>>(emptyMap()) }
@@ -146,6 +170,7 @@ fun OverviewScreen(
     var showAddWeightDialog by remember { mutableStateOf(false) }
     var showWeightManagementSheet by remember { mutableStateOf(false) }
     var showMonthYearPicker by remember { mutableStateOf(false) }
+    var showHeartRateThresholdDialog by remember { mutableStateOf(false) }
     var monthYearPickerYear by rememberSaveable { mutableIntStateOf(YearMonth.now().year) }
     var monthYearPickerMonth by rememberSaveable { mutableIntStateOf(YearMonth.now().monthValue) }
     var weightInput by rememberSaveable { mutableStateOf("") }
@@ -330,6 +355,12 @@ fun OverviewScreen(
                     TextButton(onClick = onExerciseComparisonClick) {
                         Text(stringResource(R.string.exercise_comparison_open_button))
                     }
+                    IconButton(onClick = onTrainingDaysBuilderClick) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = stringResource(R.string.training_days_builder_open)
+                        )
+                    }
                 }
             )
         }
@@ -342,51 +373,82 @@ fun OverviewScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                trainingDays.forEach { trainingDay ->
-                    val isActiveWorkoutButton = activeTrainingDay == trainingDay
-                    val isHighlightedNextTrainingDay = highlightedTrainingDay == trainingDay
-                    val buttonContainerColor = when {
-                        isActiveWorkoutButton -> ActiveDayContainerColor
-                        isHighlightedNextTrainingDay -> RecommendedDayContainerColor
-                        else -> MaterialTheme.colorScheme.surfaceVariant
-                    }
-                    val buttonContentColor = when {
-                        isActiveWorkoutButton -> ActiveDayContentColor
-                        isHighlightedNextTrainingDay -> RecommendedDayContentColor
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    val buttonBorder = when {
-                        isActiveWorkoutButton -> BorderStroke(1.5.dp, ActiveDayBorderColor)
-                        isHighlightedNextTrainingDay -> BorderStroke(1.5.dp, RecommendedDayBorderColor)
-                        else -> null
-                    }
+            if (trainingDays.isEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Text(
+                        text = stringResource(R.string.training_days_empty),
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    trainingDays.forEach { trainingDay ->
+                        val isActiveWorkoutButton = activeTrainingDay == trainingDay.runtimeDayNumber
+                        val isHighlightedNextTrainingDay = highlightedTrainingDay == trainingDay.runtimeDayNumber
+                        val buttonContainerColor = when {
+                            isActiveWorkoutButton -> ActiveDayContainerColor
+                            isHighlightedNextTrainingDay -> RecommendedDayContainerColor
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        }
+                        val buttonContentColor = when {
+                            isActiveWorkoutButton -> ActiveDayContentColor
+                            isHighlightedNextTrainingDay -> RecommendedDayContentColor
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        val buttonBorder = when {
+                            isActiveWorkoutButton -> BorderStroke(1.5.dp, ActiveDayBorderColor)
+                            isHighlightedNextTrainingDay -> BorderStroke(1.5.dp, RecommendedDayBorderColor)
+                            else -> null
+                        }
 
-                    Button(
-                        onClick = { onTrainingDayClick(trainingDay) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 40.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        border = buttonBorder,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = buttonContainerColor,
-                            contentColor = buttonContentColor,
-                            disabledContainerColor = buttonContainerColor,
-                            disabledContentColor = buttonContentColor
-                        )
-                    ) {
-                        Text(
-                            text = stringResource(R.string.training_day_title, trainingDay),
-                            style = MaterialTheme.typography.labelLarge
-                        )
+                        Button(
+                            onClick = { onTrainingDayClick(trainingDay.runtimeDayNumber) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 40.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            border = buttonBorder,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = buttonContainerColor,
+                                contentColor = buttonContentColor,
+                                disabledContainerColor = buttonContainerColor,
+                                disabledContentColor = buttonContentColor
+                            )
+                        ) {
+                            Text(
+                                text = trainingDay.name,
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
                     }
                 }
             }
+
+            MusicControlSection(
+                playbackState = musicPlaybackState,
+                onPreviousClick = onMusicPreviousClick,
+                onPlayPauseClick = onMusicPlayPauseClick,
+                onNextClick = onMusicNextClick
+            )
+
+            HeartRateRuntimeSection(
+                state = heartRateState,
+                sourceState = heartRateBleState,
+                onReconnect = onHeartRateReconnect,
+                onSelectTargetDevice = onHeartRateSelectTargetDevice,
+                onEditThreshold = { showHeartRateThresholdDialog = true }
+            )
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -935,6 +997,17 @@ fun OverviewScreen(
             }
         )
     }
+
+    if (showHeartRateThresholdDialog) {
+        HeartRateThresholdDialog(
+            currentThresholdBpm = heartRateState.thresholdBpm,
+            onDismiss = { showHeartRateThresholdDialog = false },
+            onSave = { thresholdBpm ->
+                onHeartRateThresholdChange(thresholdBpm)
+                showHeartRateThresholdDialog = false
+            }
+        )
+    }
 }
 
 private sealed interface WeightDeletionTarget {
@@ -1319,6 +1392,109 @@ private fun MonthYearPickerSheet(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(stringResource(R.string.calendar_month_year_picker_cancel))
+        }
+    }
+}
+
+@Composable
+private fun MusicControlSection(
+    playbackState: MusicPlaybackState,
+    onPreviousClick: () -> Unit,
+    onPlayPauseClick: () -> Unit,
+    onNextClick: () -> Unit
+) {
+    val hasTracks = playbackState.trackCount > 0
+    val currentStateText = playbackState.currentTrackTitle?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.music_empty_hint)
+    var showMusicHelpDialog by rememberSaveable { mutableStateOf(false) }
+
+    if (showMusicHelpDialog) {
+        AlertDialog(
+            onDismissRequest = { showMusicHelpDialog = false },
+            title = { Text(text = stringResource(R.string.music_help_dialog_title)) },
+            text = {
+                Text(text = stringResource(R.string.music_help_dialog_message))
+            },
+            confirmButton = {
+                TextButton(onClick = { showMusicHelpDialog = false }) {
+                    Text(text = stringResource(R.string.music_help_dialog_close))
+                }
+            }
+        )
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onPreviousClick,
+                    enabled = hasTracks,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.SkipPrevious,
+                        contentDescription = stringResource(R.string.music_previous_track)
+                    )
+                }
+                IconButton(
+                    onClick = onPlayPauseClick,
+                    enabled = hasTracks,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = if (playbackState.isPlaying) {
+                            Icons.Filled.Pause
+                        } else {
+                            Icons.Filled.PlayArrow
+                        },
+                        contentDescription = if (playbackState.isPlaying) {
+                            stringResource(R.string.music_pause)
+                        } else {
+                            stringResource(R.string.music_play)
+                        }
+                    )
+                }
+                IconButton(
+                    onClick = onNextClick,
+                    enabled = hasTracks,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.SkipNext,
+                        contentDescription = stringResource(R.string.music_next_track)
+                    )
+                }
+                IconButton(
+                    onClick = { showMusicHelpDialog = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Info,
+                        contentDescription = stringResource(R.string.music_help_icon_description)
+                    )
+                }
+            }
+
+            Text(
+                text = currentStateText,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

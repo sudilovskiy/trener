@@ -1,6 +1,11 @@
 package com.example.trener
 
 import com.example.trener.data.local.TrenerDatabase
+import com.example.trener.data.local.CATALOG_PARAMETER_TYPE_COUNT
+import com.example.trener.data.local.CATALOG_PARAMETER_TYPE_CUSTOM
+import com.example.trener.data.local.CATALOG_PARAMETER_TYPE_TIME
+import com.example.trener.data.local.CATALOG_PARAMETER_TYPE_WEIGHT
+import com.example.trener.data.local.normalizeCatalogParameterType
 import java.time.Instant
 import java.time.LocalDate
 import kotlin.math.max
@@ -55,6 +60,72 @@ suspend fun loadExerciseProgressEntries(
     }
 
     return latestPointByDate.values.sortedBy { it.entryDateEpochDay }
+}
+
+suspend fun loadExerciseParameterProgressEntries(
+    database: TrenerDatabase,
+    exerciseId: String
+): List<ComparisonSeriesPoint> {
+    val rows = database.workoutSessionDao().getExerciseParameterProgressRows(exerciseId)
+    if (rows.isEmpty()) {
+        return emptyList()
+    }
+
+    val parameterType = getExerciseDefinition(exerciseId)?.parameterType
+        ?.let(::normalizeCatalogParameterType)
+        .orEmpty()
+
+    val sessionAggregates = buildList {
+        var currentSessionId: Long? = null
+        var currentSessionDateEpochDay = 0L
+        var currentSessionValues = mutableListOf<Double>()
+
+        fun flushCurrentSession() {
+            val sessionId = currentSessionId ?: return
+            val sessionAggregate = buildParameterSessionAggregate(
+                sessionId = sessionId,
+                entryDateEpochDay = currentSessionDateEpochDay,
+                parameterType = parameterType,
+                values = currentSessionValues
+            ) ?: return
+            add(sessionAggregate)
+        }
+
+        rows.forEach { row ->
+            if (row.sessionId != currentSessionId) {
+                flushCurrentSession()
+                currentSessionId = row.sessionId
+                currentSessionDateEpochDay = epochMillisToLocalDate(row.startTimestampEpochMillis)
+                    .toEpochDay()
+                currentSessionValues = mutableListOf()
+            }
+
+            val parameterValue = row.parameterOverrideValue ?: row.parameterValue
+            if (parameterValue != null) {
+                currentSessionValues.add(parameterValue)
+            }
+        }
+
+        flushCurrentSession()
+    }
+
+    if (sessionAggregates.isEmpty()) {
+        return emptyList()
+    }
+
+    val dayAggregates = linkedMapOf<Long, ExerciseParameterDayAccumulator>()
+    sessionAggregates.forEach { sessionAggregate ->
+        val dayAccumulator = dayAggregates.getOrPut(sessionAggregate.entryDateEpochDay) {
+            ExerciseParameterDayAccumulator(parameterType = parameterType)
+        }
+        dayAccumulator.add(sessionAggregate)
+    }
+
+    return dayAggregates.entries
+        .mapNotNull { (entryDateEpochDay, accumulator) ->
+            accumulator.toComparisonSeriesPoint(entryDateEpochDay)
+        }
+        .sortedBy(ComparisonSeriesPoint::entryDateEpochDay)
 }
 
 fun resolveExerciseProgressRange(
@@ -294,6 +365,106 @@ private data class ExerciseProgressSessionPoint(
     val entryDateEpochDay: Long,
     val totalReps: Int
 )
+
+private data class ExerciseParameterSessionPoint(
+    val sessionId: Long,
+    val entryDateEpochDay: Long,
+    val value: Double,
+    val sampleCount: Int,
+    val sampleSum: Double
+)
+
+private data class ExerciseParameterDayAccumulator(
+    val parameterType: String
+) {
+    private var maxValue: Double? = null
+    private var totalValue: Double = 0.0
+    private var totalSampleSum: Double = 0.0
+    private var totalSampleCount: Int = 0
+
+    fun add(sessionAggregate: ExerciseParameterSessionPoint) {
+        when (parameterType) {
+            CATALOG_PARAMETER_TYPE_WEIGHT -> {
+                maxValue = maxOfOrNull(maxValue, sessionAggregate.value)
+            }
+            CATALOG_PARAMETER_TYPE_COUNT,
+            CATALOG_PARAMETER_TYPE_TIME -> {
+                totalValue += sessionAggregate.value
+            }
+            CATALOG_PARAMETER_TYPE_CUSTOM -> {
+                totalSampleSum += sessionAggregate.sampleSum
+                totalSampleCount += sessionAggregate.sampleCount
+            }
+            else -> {
+                totalSampleSum += sessionAggregate.sampleSum
+                totalSampleCount += sessionAggregate.sampleCount
+            }
+        }
+    }
+
+    fun toComparisonSeriesPoint(entryDateEpochDay: Long): ComparisonSeriesPoint? {
+        val value = when (parameterType) {
+            CATALOG_PARAMETER_TYPE_WEIGHT -> maxValue
+            CATALOG_PARAMETER_TYPE_COUNT,
+            CATALOG_PARAMETER_TYPE_TIME -> totalValue
+            CATALOG_PARAMETER_TYPE_CUSTOM -> {
+                if (totalSampleCount <= 0) {
+                    null
+                } else {
+                    totalSampleSum / totalSampleCount.toDouble()
+                }
+            }
+            else -> {
+                if (totalSampleCount <= 0) {
+                    null
+                } else {
+                    totalSampleSum / totalSampleCount.toDouble()
+                }
+            }
+        } ?: return null
+
+        return ComparisonSeriesPoint(
+            entryDateEpochDay = entryDateEpochDay,
+            value = value
+        )
+    }
+}
+
+private fun buildParameterSessionAggregate(
+    sessionId: Long,
+    entryDateEpochDay: Long,
+    parameterType: String,
+    values: List<Double>
+): ExerciseParameterSessionPoint? {
+    if (values.isEmpty()) {
+        return null
+    }
+
+    val normalizedType = parameterType.ifBlank { CATALOG_PARAMETER_TYPE_CUSTOM }
+    val value = when (normalizedType) {
+        CATALOG_PARAMETER_TYPE_WEIGHT -> values.maxOrNull()
+        CATALOG_PARAMETER_TYPE_COUNT,
+        CATALOG_PARAMETER_TYPE_TIME -> values.sum()
+        CATALOG_PARAMETER_TYPE_CUSTOM -> values.sum() / values.size.toDouble()
+        else -> values.sum() / values.size.toDouble()
+    } ?: return null
+
+    return ExerciseParameterSessionPoint(
+        sessionId = sessionId,
+        entryDateEpochDay = entryDateEpochDay,
+        value = value,
+        sampleCount = values.size,
+        sampleSum = values.sum()
+    )
+}
+
+private fun maxOfOrNull(current: Double?, candidate: Double): Double {
+    return when {
+        current == null -> candidate
+        candidate > current -> candidate
+        else -> current
+    }
+}
 
 private fun <T> buildSeriesRangeForWindowSize(
     records: List<T>,

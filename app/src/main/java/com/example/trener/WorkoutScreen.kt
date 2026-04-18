@@ -35,6 +35,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.trener.data.local.entity.WorkoutSessionEntity
+import com.example.trener.ble.heartrate.HeartRateBleSourceState
+import com.example.trener.domain.heartrate.HeartRateRuntimeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -44,16 +46,31 @@ import kotlinx.coroutines.withContext
 @Composable
 fun WorkoutScreen(
     databaseRefreshToken: Int,
+    programRefreshToken: Int,
     trainingDay: Int,
     sessionUiState: WorkoutSessionUiState,
+    heartRateState: HeartRateRuntimeState,
+    heartRateBleState: HeartRateBleSourceState? = null,
+    onHeartRateReconnect: () -> Unit,
+    onHeartRateSelectTargetDevice: ((String) -> Unit)? = null,
     onExerciseClick: (String) -> Unit
 ) {
     val context = LocalContext.current.applicationContext
+    val application = context as TrenerApplication
     val database = rememberTrenerDatabase(databaseRefreshToken)
     val coroutineScope = rememberCoroutineScope()
     val activeWorkout = sessionUiState.activeWorkout
     val workoutTrainingDay = activeWorkout?.trainingDay ?: trainingDay
-    val dayExercises = remember(workoutTrainingDay) { getExercisesForDay(workoutTrainingDay) }
+    val dayExercises = remember(activeWorkout, workoutTrainingDay, programRefreshToken) {
+        activeWorkout?.exerciseDefinitions ?: getExercisesForDay(workoutTrainingDay)
+    }
+    val workoutDayName = remember(activeWorkout, workoutTrainingDay, programRefreshToken) {
+        activeWorkout?.dayName ?: getWorkoutProgramDays()
+            .firstOrNull { day -> day.runtimeDayNumber == workoutTrainingDay }
+            ?.name
+            ?: context.getString(R.string.training_day_title, workoutTrainingDay)
+    }
+    val canStartWorkout = dayExercises.isNotEmpty()
 
     var currentTimeMillis by remember(workoutTrainingDay) {
         mutableLongStateOf(System.currentTimeMillis())
@@ -91,7 +108,7 @@ fun WorkoutScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.training_day_title, trainingDay)) }
+                title = { Text(workoutDayName) }
             )
         }
     ) { innerPadding ->
@@ -124,6 +141,15 @@ fun WorkoutScreen(
                     } else {
                         Button(
                             onClick = {
+                                if (!canStartWorkout) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.training_day_exercises_empty),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    return@Button
+                                }
+
                                 val workoutStartedAtMillis = System.currentTimeMillis()
                                 isStarting = true
                                 coroutineScope.launch {
@@ -140,7 +166,12 @@ fun WorkoutScreen(
                                         sessionUiState.startWorkout(
                                             sessionId = sessionId,
                                             trainingDay = workoutTrainingDay,
+                                            dayName = workoutDayName,
+                                            exerciseDefinitions = dayExercises,
                                             startedAtMillis = workoutStartedAtMillis
+                                        )
+                                        application.heartRateRuntimeCoordinator.bindWorkoutSession(
+                                            sessionId
                                         )
                                         currentTimeMillis = workoutStartedAtMillis
                                     }.onFailure {
@@ -153,7 +184,10 @@ fun WorkoutScreen(
                                     isStarting = false
                                 }
                             },
-                            enabled = !sessionUiState.hasActiveWorkout() && !isSaving && !isStarting,
+                            enabled = !sessionUiState.hasActiveWorkout() &&
+                                !isSaving &&
+                                !isStarting &&
+                                canStartWorkout,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
@@ -199,55 +233,74 @@ fun WorkoutScreen(
             }
 
             item {
+                HeartRateRuntimeSection(
+                    state = heartRateState,
+                    sourceState = heartRateBleState,
+                    onReconnect = onHeartRateReconnect,
+                    onSelectTargetDevice = onHeartRateSelectTargetDevice
+                )
+            }
+
+            item {
                 SectionCard(title = stringResource(R.string.workout_exercises_title)) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        dayExercises.forEach { exercise ->
-                            val isCompleted = sessionUiState.isRepBasedExerciseCompleted(exercise.exerciseId)
-                            Button(
-                                onClick = { onExerciseClick(exercise.exerciseId) },
-                                enabled = isWorkoutStarted && !isSaving,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isCompleted) {
-                                        MaterialTheme.colorScheme.secondaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.primary
-                                    },
-                                    contentColor = if (isCompleted) {
-                                        MaterialTheme.colorScheme.onSecondaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onPrimary
-                                    },
-                                    disabledContainerColor = if (isCompleted) {
-                                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceVariant
-                                    },
-                                    disabledContentColor = if (isCompleted) {
-                                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
+                    if (dayExercises.isEmpty()) {
+                        Text(
+                            text = context.getString(R.string.training_day_exercises_empty),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            dayExercises.forEach { exercise ->
+                                val isCompleted = sessionUiState.isExerciseCompleted(
+                                    exerciseId = exercise.exerciseId,
+                                    setCount = sessionUiState.getRequiredSetCount(exercise.exerciseId)
                                 )
-                            ) {
-                                Row(
+                                Button(
+                                    onClick = { onExerciseClick(exercise.exerciseId) },
+                                    enabled = isWorkoutStarted && !isSaving,
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = getExerciseLabel(context, exercise.exerciseId),
-                                        modifier = Modifier.weight(1f)
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isCompleted) {
+                                            MaterialTheme.colorScheme.secondaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        },
+                                        contentColor = if (isCompleted) {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        },
+                                        disabledContainerColor = if (isCompleted) {
+                                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                        disabledContentColor = if (isCompleted) {
+                                            MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
                                     )
-                                    if (isCompleted) {
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
-                                            text = CompletedExerciseIndicator,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            modifier = Modifier.padding(start = 12.dp)
+                                            text = exercise.name.ifBlank {
+                                                getExerciseLabel(context, exercise.exerciseId)
+                                            },
+                                            modifier = Modifier.weight(1f)
                                         )
-                                    } else {
-                                        Spacer(modifier = Modifier.width(24.dp))
+                                        if (isCompleted) {
+                                            Text(
+                                                text = CompletedExerciseIndicator,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                modifier = Modifier.padding(start = 12.dp)
+                                            )
+                                        } else {
+                                            Spacer(modifier = Modifier.width(24.dp))
+                                        }
                                     }
                                 }
                             }

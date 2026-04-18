@@ -46,6 +46,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun WorkoutDetailScreen(
     databaseRefreshToken: Int,
+    programRefreshToken: Int,
     sessionId: Long,
     activeWorkoutSessionId: Long?,
     refreshToken: Int,
@@ -64,7 +65,13 @@ fun WorkoutDetailScreen(
     var isDeleting by remember { mutableStateOf(false) }
     val isActiveWorkout = activeWorkoutSessionId == sessionId
 
-    LaunchedEffect(sessionId, refreshToken, databaseRefreshToken, getWorkoutSessionWithSets) {
+    LaunchedEffect(
+        sessionId,
+        refreshToken,
+        databaseRefreshToken,
+        programRefreshToken,
+        getWorkoutSessionWithSets
+    ) {
         isLoading = true
         loadError = null
         workoutDetail = null
@@ -320,26 +327,34 @@ private data class WorkoutDetailSetUiModel(
 )
 
 private fun WorkoutSessionWithSets.toWorkoutDetailUiModel(context: android.content.Context): WorkoutDetailUiModel {
-    val exercises = getExercisesForDay(session.trainingDay).map { definition ->
-        val setsByNumber = sets
-            .asSequence()
-            .filter { it.exerciseId == definition.exerciseId }
-            .associateBy(WorkoutSessionSetEntity::setNumber)
+    val setsByExercise = sets.groupBy(WorkoutSessionSetEntity::exerciseId)
+    val exercises = sets
+        .map(WorkoutSessionSetEntity::exerciseId)
+        .distinct()
+        .map { exerciseId ->
+            val persistedSets = setsByExercise[exerciseId].orEmpty()
+            val definition = resolveWorkoutExerciseDefinitionFromHistory(
+                exerciseId = exerciseId,
+                persistedSets = persistedSets
+            )
+            val setsByNumber = persistedSets.associateBy(WorkoutSessionSetEntity::setNumber)
 
-        WorkoutDetailExerciseUiModel(
-            exerciseId = definition.exerciseId,
-            title = getExerciseLabel(context, definition.exerciseId),
-            sets = (1..DETAIL_SET_COUNT).map { setNumber ->
-                val persistedSet = setsByNumber[setNumber]
-                WorkoutDetailSetUiModel(
-                    setNumber = setNumber,
-                    valuesText = persistedSet?.let { buildWorkoutSetValuesText(context, it) }
-                        ?: context.getString(R.string.set_values_not_specified),
-                    note = persistedSet?.note.orEmpty()
-                )
-            }
-        )
-    }
+            WorkoutDetailExerciseUiModel(
+                exerciseId = definition.exerciseId,
+                title = getExerciseLabel(context, definition.exerciseId),
+                sets = (1..DETAIL_SET_COUNT).map { setNumber ->
+                    val persistedSet = setsByNumber[setNumber]
+                    WorkoutDetailSetUiModel(
+                        setNumber = setNumber,
+                        valuesText = persistedSet?.let {
+                            buildWorkoutSetValuesText(context, definition, it)
+                        }
+                            ?: context.getString(R.string.set_values_not_specified),
+                        note = persistedSet?.note.orEmpty()
+                    )
+                }
+            )
+        }
 
     return WorkoutDetailUiModel(
         session = session,

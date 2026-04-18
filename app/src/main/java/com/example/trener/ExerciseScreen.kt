@@ -67,9 +67,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.trener.ble.heartrate.HeartRateBleSourceState
 import com.example.trener.data.local.TrenerDatabase
-import com.example.trener.data.local.entity.WorkoutSessionSetEntity
+import com.example.trener.domain.heartrate.HeartRateRuntimeState
 import com.example.trener.domain.workout.PreparedWorkoutSessionSet
+import com.example.trener.domain.workout.toPreparedWorkoutSessionSet
+import com.example.trener.domain.workout.toWorkoutSessionSetEntity
 import com.example.trener.domain.workout.loadPersistedMaxValuesBySetNumber
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,8 +85,13 @@ import java.time.format.DateTimeFormatter
 fun ExerciseScreen(
     exerciseId: String,
     databaseRefreshToken: Int,
+    programRefreshToken: Int,
     historyRefreshToken: Int,
     sessionUiState: WorkoutSessionUiState,
+    heartRateState: HeartRateRuntimeState,
+    heartRateBleState: HeartRateBleSourceState? = null,
+    onHeartRateReconnect: () -> Unit,
+    onHeartRateSelectTargetDevice: ((String) -> Unit)? = null,
     onFinished: () -> Unit
 ) {
     val context = LocalContext.current
@@ -93,20 +101,51 @@ fun ExerciseScreen(
     val setLabels = List(setCount) { index ->
         context.getString(R.string.exercise_set_label, index + 1)
     }
-    val exerciseDefinition = remember(exerciseId) { getExerciseDefinition(exerciseId) }
-    val exerciseName = exerciseDefinition?.let { context.getString(it.labelResId) } ?: exerciseId
+    val activeExerciseDefinition = remember(sessionUiState.activeWorkout, exerciseId) {
+        sessionUiState.getActiveExerciseDefinition(exerciseId)
+    }
+    val exerciseDefinition = remember(exerciseId, programRefreshToken, activeExerciseDefinition) {
+        getExerciseDefinition(
+            exerciseId = exerciseId,
+            preferredDefinitions = listOfNotNull(activeExerciseDefinition)
+        )
+    }
+    val exerciseName = remember(exerciseId, programRefreshToken, activeExerciseDefinition) {
+        getExerciseLabel(
+            context = context,
+            exerciseId = exerciseId,
+            preferredDefinitions = listOfNotNull(activeExerciseDefinition)
+        )
+    }
     val exerciseInputType = exerciseDefinition?.inputType ?: ExerciseInputType.REPS
+    val exerciseParameterLabel = exerciseDefinition?.parameterLabel
+        ?.trim()
+        .takeIf { !it.isNullOrBlank() }
+        ?: stringResource(R.string.exercise_parameter_fallback_label)
+    val exerciseParameterType = exerciseDefinition?.parameterType
+        ?.trim()
+        .orEmpty()
+    val exerciseParameterUnit = exerciseDefinition?.parameterUnit
+        ?.trim()
+        .orEmpty()
     val isPullUpsExercise = exerciseId == "pull_ups_ui"
     val setStates = sessionUiState.getExerciseSetUiStates(exerciseId, setCount)
+    val sharedParameterValue = remember(setStates) {
+        setStates.asSequence()
+            .map { it.set.parameterValue }
+            .firstOrNull { it != null }
+    }
     val currentExerciseTotalReps by remember(setStates) {
         derivedStateOf {
             setStates.sumOf { setUiState -> setUiState.set.reps ?: 0 }
         }
     }
-
     val isExerciseCompleted = sessionUiState.isExerciseCompleted(exerciseId, setCount)
     val isEditingEnabled = sessionUiState.isExerciseInActiveWorkout(exerciseId) && !sessionUiState.isSaving
     val focusManager = LocalFocusManager.current
+    var exerciseAnalyticsMetric by rememberSaveable(exerciseId) {
+        mutableStateOf(defaultExerciseAnalyticsMetric)
+    }
     var savingSetNumber by rememberSaveable(exerciseId) { mutableStateOf<Int?>(null) }
     var isFinishingAllSets by rememberSaveable(exerciseId) { mutableStateOf(false) }
     var hasRequestedFinishNavigation by rememberSaveable(exerciseId) { mutableStateOf(false) }
@@ -115,6 +154,12 @@ fun ExerciseScreen(
     var previousExerciseTotalReps by remember(exerciseId) { mutableIntStateOf(0) }
     var exerciseProgressEntries by remember(exerciseId) {
         mutableStateOf<List<ExerciseProgressPoint>>(emptyList())
+    }
+    var exerciseParameterProgressEntries by remember(exerciseId) {
+        mutableStateOf<List<ComparisonSeriesPoint>>(emptyList())
+    }
+    val exerciseRepetitionProgressSeries = remember(exerciseProgressEntries) {
+        exerciseProgressEntries.map(ExerciseProgressPoint::toComparisonSeriesPoint)
     }
     var exerciseProgressRangeMode by rememberSaveable(exerciseId) {
         mutableStateOf(ExerciseProgressRangeMode.All)
@@ -142,13 +187,44 @@ fun ExerciseScreen(
     }
     val exerciseRangeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val fullDateFormatter = remember { DateTimeFormatter.ofPattern("dd.MM.yyyy") }
-    val filteredExerciseProgressEntries = remember(exerciseProgressEntries, exerciseProgressRange) {
-        exerciseProgressEntries.filter { point ->
+    val hasParameterAnalytics = remember(
+        exerciseParameterType,
+        exerciseRepetitionProgressSeries,
+        exerciseParameterProgressEntries
+    ) {
+        exerciseParameterType.isNotBlank() || exerciseParameterProgressEntries.isNotEmpty()
+    }
+    val selectedExerciseProgressSeries = remember(
+        exerciseAnalyticsMetric,
+        exerciseRepetitionProgressSeries,
+        exerciseParameterProgressEntries
+    ) {
+        when (exerciseAnalyticsMetric) {
+            ExerciseAnalyticsMetric.Repetitions -> exerciseRepetitionProgressSeries
+            ExerciseAnalyticsMetric.Parameter -> exerciseParameterProgressEntries
+        }
+    }
+    val filteredExerciseProgressSeries = remember(
+        selectedExerciseProgressSeries,
+        exerciseProgressRange
+    ) {
+        selectedExerciseProgressSeries.filter { point ->
             point.entryDateEpochDay in exerciseProgressRange.startEpochDay..exerciseProgressRange.endEpochDay
         }
     }
-    val filteredExerciseProgressSeries = remember(filteredExerciseProgressEntries) {
-        filteredExerciseProgressEntries.map(ExerciseProgressPoint::toComparisonSeriesPoint)
+    val exerciseAnalyticsValueLabelFormatter = remember(exerciseAnalyticsMetric, exerciseParameterUnit) {
+        when (exerciseAnalyticsMetric) {
+            ExerciseAnalyticsMetric.Repetitions -> ::formatExerciseAxisLabel
+            ExerciseAnalyticsMetric.Parameter -> { value: Double, step: Double ->
+                buildString {
+                    append(formatExerciseAxisLabel(value, step))
+                    if (exerciseParameterUnit.isNotBlank()) {
+                        append(' ')
+                        append(exerciseParameterUnit)
+                    }
+                }
+            }
+        }
     }
 
     fun finishExerciseOnce() {
@@ -188,7 +264,20 @@ fun ExerciseScreen(
         exerciseProgressRange = resolvedRange
     }
 
-    LaunchedEffect(exerciseId, exerciseInputType, isEditingEnabled, historyLoaded, setCount) {
+    LaunchedEffect(hasParameterAnalytics, exerciseAnalyticsMetric) {
+        if (!hasParameterAnalytics && exerciseAnalyticsMetric == ExerciseAnalyticsMetric.Parameter) {
+            exerciseAnalyticsMetric = ExerciseAnalyticsMetric.Repetitions
+        }
+    }
+
+    LaunchedEffect(
+        exerciseId,
+        exerciseInputType,
+        isEditingEnabled,
+        historyLoaded,
+        setCount,
+        programRefreshToken
+    ) {
         if (historyLoaded || !isEditingEnabled) return@LaunchedEffect
 
         val previousSets = withContext(Dispatchers.IO) {
@@ -196,17 +285,7 @@ fun ExerciseScreen(
                 database.workoutSessionSetDao().getLatestSetForExerciseAndNumber(
                     exerciseId = exerciseId,
                     setNumber = index + 1
-                )?.let { previousSet ->
-                    PreparedWorkoutSessionSet(
-                        exerciseId = exerciseId,
-                        setNumber = index + 1,
-                        reps = previousSet.reps,
-                        weight = previousSet.weight,
-                        additionalValue = previousSet.additionalValue,
-                        flag = previousSet.flag,
-                        note = previousSet.note
-                    )
-                } ?: PreparedWorkoutSessionSet(
+                )?.toPreparedWorkoutSessionSet() ?: PreparedWorkoutSessionSet(
                     exerciseId = exerciseId,
                     setNumber = index + 1
                 )
@@ -245,11 +324,39 @@ fun ExerciseScreen(
                 exerciseId = exerciseId
             )
         }
+        val loadedExerciseParameterProgressEntries = withContext(Dispatchers.IO) {
+            loadExerciseParameterProgressEntries(
+                database = database,
+                exerciseId = exerciseId
+            )
+        }
         exerciseProgressEntries = loadedExerciseProgressEntries
+        exerciseParameterProgressEntries = loadedExerciseParameterProgressEntries
         exerciseProgressRangeMode = ExerciseProgressRangeMode.All
-        exerciseProgressRange = resolveExerciseProgressRange(
-            records = loadedExerciseProgressEntries,
+        exerciseProgressRange = resolveSelectedExerciseAnalyticsRange(
+            metric = exerciseAnalyticsMetric,
+            repetitions = loadedExerciseProgressEntries.map(ExerciseProgressPoint::toComparisonSeriesPoint),
+            parameter = loadedExerciseParameterProgressEntries,
             mode = ExerciseProgressRangeMode.All,
+            currentRange = exerciseProgressRange
+        )
+    }
+
+    LaunchedEffect(
+        exerciseAnalyticsMetric,
+        exerciseProgressEntries,
+        exerciseParameterProgressEntries,
+        exerciseProgressRangeMode
+    ) {
+        if (exerciseProgressRangeMode == ExerciseProgressRangeMode.Custom) {
+            return@LaunchedEffect
+        }
+
+        exerciseProgressRange = resolveSelectedExerciseAnalyticsRange(
+            metric = exerciseAnalyticsMetric,
+            repetitions = exerciseRepetitionProgressSeries,
+            parameter = exerciseParameterProgressEntries,
+            mode = exerciseProgressRangeMode,
             currentRange = exerciseProgressRange
         )
     }
@@ -317,6 +424,33 @@ fun ExerciseScreen(
                 )
             }
 
+            HeartRateRuntimeSection(
+                state = heartRateState,
+                sourceState = heartRateBleState,
+                onReconnect = onHeartRateReconnect,
+                onSelectTargetDevice = onHeartRateSelectTargetDevice
+            )
+
+            if (hasParameterAnalytics) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ExerciseSelectorButton(
+                        label = stringResource(R.string.exercise_progress_metric_repetitions),
+                        selected = exerciseAnalyticsMetric == ExerciseAnalyticsMetric.Repetitions,
+                        modifier = Modifier.weight(1f),
+                        onClick = { exerciseAnalyticsMetric = ExerciseAnalyticsMetric.Repetitions }
+                    )
+                    ExerciseSelectorButton(
+                        label = stringResource(R.string.exercise_progress_metric_parameter),
+                        selected = exerciseAnalyticsMetric == ExerciseAnalyticsMetric.Parameter,
+                        modifier = Modifier.weight(1f),
+                        onClick = { exerciseAnalyticsMetric = ExerciseAnalyticsMetric.Parameter }
+                    )
+                }
+            }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.extraLarge,
@@ -330,6 +464,22 @@ fun ExerciseScreen(
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    ExerciseParameterSharedRow(
+                        label = exerciseParameterLabel,
+                        unit = exerciseParameterUnit,
+                        value = sharedParameterValue.toParameterDisplayString(),
+                        enabled = isEditingEnabled,
+                        onValueChange = { updatedValue ->
+                            val parsedValue = updatedValue.toDecimalOrNull()
+                            sessionUiState.updateExerciseSets(
+                                exerciseId = exerciseId,
+                                sets = setStates.map { currentSetUiState ->
+                                    currentSetUiState.set.copy(parameterValue = parsedValue)
+                                },
+                                allowCompletedOverride = true
+                            )
+                        }
+                    )
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(3.dp)
@@ -342,7 +492,6 @@ fun ExerciseScreen(
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(SetCardHeight)
                                     .semantics { testTag = "exercise-set-${setState.setNumber}" },
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (setUiState.isCompleted) {
@@ -605,6 +754,48 @@ fun ExerciseScreen(
                                         enabled = isSetEditable,
                                         isReadOnly = !isSetEditable
                                     )
+                                    if (isSetEditable || setState.parameterOverrideValue != null) {
+                                        ExerciseParameterOverrideRow(
+                                            label = exerciseParameterLabel,
+                                            unit = exerciseParameterUnit,
+                                            value = setState.parameterOverrideValue.toParameterDisplayString(),
+                                            hasValue = setState.parameterOverrideValue != null,
+                                            enabled = isSetEditable,
+                                            onEnableOverride = {
+                                                val fallbackValue = sharedParameterValue ?: 0.0
+                                                updateSetStates(
+                                                    currentStates = setStates.map(ExerciseSetUiState::set),
+                                                    index = index,
+                                                    exerciseId = exerciseId,
+                                                    sessionUiState = sessionUiState
+                                                ) { updated ->
+                                                    updated.copy(parameterOverrideValue = fallbackValue)
+                                                }
+                                            },
+                                            onDisableOverride = {
+                                                updateSetStates(
+                                                    currentStates = setStates.map(ExerciseSetUiState::set),
+                                                    index = index,
+                                                    exerciseId = exerciseId,
+                                                    sessionUiState = sessionUiState
+                                                ) { updated ->
+                                                    updated.copy(parameterOverrideValue = null)
+                                                }
+                                            },
+                                            onValueChange = { updatedValue ->
+                                                updateSetStates(
+                                                    currentStates = setStates.map(ExerciseSetUiState::set),
+                                                    index = index,
+                                                    exerciseId = exerciseId,
+                                                    sessionUiState = sessionUiState
+                                                ) { updated ->
+                                                    updated.copy(
+                                                        parameterOverrideValue = updatedValue.toDecimalOrNull()
+                                                    )
+                                                }
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -638,7 +829,8 @@ fun ExerciseScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(180.dp),
-                        onSizeChanged = { _: androidx.compose.ui.unit.IntSize -> }
+                        onSizeChanged = { _: androidx.compose.ui.unit.IntSize -> },
+                        valueLabelFormatter = exerciseAnalyticsValueLabelFormatter
                     )
                     OutlinedButton(
                         onClick = { openExerciseRangeSheet() },
@@ -949,6 +1141,140 @@ private fun ExerciseScreenRangePresetButton(
 }
 
 @Composable
+private fun ExerciseParameterSharedRow(
+    label: String,
+    unit: String,
+    value: String,
+    enabled: Boolean,
+    onValueChange: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CompactDecimalField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(CompactFieldHeight),
+                enabled = enabled,
+                isReadOnly = !enabled,
+                onDone = { }
+            )
+            if (unit.isNotBlank()) {
+                Text(
+                    text = unit,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExerciseParameterOverrideRow(
+    label: String,
+    unit: String,
+    value: String,
+    hasValue: Boolean,
+    enabled: Boolean,
+    onEnableOverride: () -> Unit,
+    onDisableOverride: () -> Unit,
+    onValueChange: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.exercise_parameter_override_label, label),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (!hasValue) {
+                TextButton(
+                    onClick = onEnableOverride,
+                    enabled = enabled,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.exercise_parameter_override_enable),
+                        maxLines = 1,
+                        softWrap = false,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+
+        if (hasValue) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CompactDecimalField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(CompactFieldHeight),
+                    enabled = enabled,
+                    isReadOnly = !enabled,
+                    onDone = { }
+                )
+                if (unit.isNotBlank()) {
+                    Text(
+                        text = unit,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+                TextButton(
+                    onClick = onDisableOverride,
+                    enabled = enabled,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.exercise_parameter_override_clear),
+                        maxLines = 1,
+                        softWrap = false,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ExerciseSetDraftRow(
     note: String,
     currentValue: String,
@@ -1175,6 +1501,55 @@ private fun CompactNumberField(
 }
 
 @Composable
+private fun CompactDecimalField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean,
+    isReadOnly: Boolean,
+    onDone: () -> Unit
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = { updatedValue ->
+            onValueChange(updatedValue.sanitizeDecimalInput())
+        },
+        modifier = modifier,
+        enabled = true,
+        readOnly = isReadOnly,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodySmall.copy(
+            color = if (enabled || isReadOnly) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        ),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Decimal,
+            imeAction = ImeAction.Done
+        ),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        decorationBox = { innerTextField ->
+            CompactFieldContainer(
+                enabled = enabled,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    innerTextField()
+                }
+            }
+        }
+    )
+}
+
+@Composable
 private fun CompactFieldContainer(
     enabled: Boolean,
     modifier: Modifier = Modifier,
@@ -1266,16 +1641,7 @@ private fun persistExerciseSet(
     }
 
     database.workoutSessionSetDao().insertWorkoutSessionSet(
-        WorkoutSessionSetEntity(
-            workoutSessionId = workoutSessionId,
-            exerciseId = set.exerciseId,
-            setNumber = set.setNumber,
-            reps = set.reps,
-            weight = set.weight,
-            additionalValue = set.additionalValue,
-            flag = set.flag,
-            note = set.note
-        )
+        set.toWorkoutSessionSetEntity(workoutSessionId)
     )
 }
 
@@ -1296,7 +1662,7 @@ private fun updatePersistedExerciseSet(
     val statement = database.openHelper.writableDatabase.compileStatement(
         """
         UPDATE workout_session_sets
-        SET reps = ?, weight = ?, additionalValue = ?, flag = ?, note = ?
+        SET reps = ?, weight = ?, additionalValue = ?, parameterValue = ?, parameterOverrideValue = ?, flag = ?, note = ?
         WHERE workoutSessionId = ? AND exerciseId = ? AND setNumber = ?
         """.trimIndent()
     )
@@ -1304,21 +1670,57 @@ private fun updatePersistedExerciseSet(
     if (set.reps != null) statement.bindLong(1, set.reps.toLong()) else statement.bindNull(1)
     if (set.weight != null) statement.bindDouble(2, set.weight) else statement.bindNull(2)
     if (set.additionalValue != null) statement.bindDouble(3, set.additionalValue) else statement.bindNull(3)
+    if (set.parameterValue != null) statement.bindDouble(4, set.parameterValue) else statement.bindNull(4)
+    if (set.parameterOverrideValue != null) statement.bindDouble(5, set.parameterOverrideValue) else statement.bindNull(5)
     when (set.flag) {
-        true -> statement.bindLong(4, 1)
-        false -> statement.bindLong(4, 0)
-        null -> statement.bindNull(4)
+        true -> statement.bindLong(6, 1)
+        false -> statement.bindLong(6, 0)
+        null -> statement.bindNull(6)
     }
-    statement.bindString(5, set.note)
-    statement.bindLong(6, workoutSessionId)
-    statement.bindString(7, set.exerciseId)
-    statement.bindLong(8, set.setNumber.toLong())
+    statement.bindString(7, set.note)
+    statement.bindLong(8, workoutSessionId)
+    statement.bindString(9, set.exerciseId)
+    statement.bindLong(10, set.setNumber.toLong())
     return statement.executeUpdateDelete()
 }
 
 private fun Int?.toDisplayString(): String = this?.toString() ?: ""
 
 private fun Double?.toDisplayString(): String = this?.toInt()?.toString() ?: ""
+
+private fun Double?.toParameterDisplayString(): String = when {
+    this == null -> ""
+    this == this.toLong().toDouble() -> this.toLong().toString()
+    else -> this.toString().trimEnd('0').trimEnd('.')
+}
+
+private fun String.toDecimalOrNull(): Double? {
+    val normalized = sanitizeDecimalInput()
+    return normalized.takeIf(String::isNotBlank)?.toDoubleOrNull()
+}
+
+private fun String.sanitizeDecimalInput(): String {
+    val normalized = replace(',', '.')
+    val builder = StringBuilder()
+    var decimalSeparatorSeen = false
+
+    normalized.forEach { char ->
+        when {
+            char.isDigit() -> builder.append(char)
+            char == '.' && !decimalSeparatorSeen -> {
+                builder.append(char)
+                decimalSeparatorSeen = true
+            }
+        }
+    }
+
+    val sanitized = builder.toString()
+    return when {
+        sanitized == "." -> ""
+        sanitized.startsWith('.') -> "0$sanitized"
+        else -> sanitized
+    }
+}
 
 private fun incrementIntValue(value: Int?): Int = (value ?: 0) + 1
 
@@ -1357,9 +1759,26 @@ private fun exerciseScreenSafeLocalDateOfEpochDay(epochDay: Long): LocalDate {
         .getOrElse { LocalDate.now() }
 }
 
+private fun resolveSelectedExerciseAnalyticsRange(
+    metric: ExerciseAnalyticsMetric,
+    repetitions: List<ComparisonSeriesPoint>,
+    parameter: List<ComparisonSeriesPoint>,
+    mode: ExerciseProgressRangeMode,
+    currentRange: ExerciseProgressRange
+): ExerciseProgressRange {
+    val records = when (metric) {
+        ExerciseAnalyticsMetric.Repetitions -> repetitions
+        ExerciseAnalyticsMetric.Parameter -> parameter
+    }
+    return resolveComparisonSeriesRange(
+        records = records,
+        mode = mode,
+        currentRange = currentRange
+    )
+}
+
 
 private const val CompletedSetAlpha = 0.6f
-private val SetCardHeight = 84.dp
 private val SetHeaderHeight = 30.dp
 private val SetBottomRowHeight = 32.dp
 private val SetActionButtonHeight = 30.dp

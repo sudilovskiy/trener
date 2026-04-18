@@ -2,8 +2,6 @@ package com.example.trener
 
 import android.content.Context
 import androidx.annotation.StringRes
-import com.example.trener.data.local.entity.WorkoutSessionSetEntity
-import com.example.trener.domain.workout.PreparedWorkoutSessionSet
 
 data class ExerciseDefinition(
     val exerciseId: String,
@@ -42,40 +40,7 @@ val exerciseDefinitionsByDay = mapOf(
     )
 )
 
-private val exerciseDefinitionsById = exerciseDefinitionsByDay
+val exerciseDefinitionsById = exerciseDefinitionsByDay
     .values
     .flatten()
     .associateBy(ExerciseDefinition::exerciseId)
-
-fun getExercisesForDay(trainingDay: Int): List<ExerciseDefinition> {
-    return exerciseDefinitionsByDay[trainingDay].orEmpty()
-}
-
-fun getExerciseDefinition(exerciseId: String): ExerciseDefinition? {
-    return exerciseDefinitionsById[exerciseId]
-}
-
-fun getExerciseLabel(context: Context, exerciseId: String): String {
-    val definition = getExerciseDefinition(exerciseId) ?: return exerciseId
-    return context.getString(definition.labelResId)
-}
-
-fun List<PreparedWorkoutSessionSet>.groupPersistedSetsByExercise(): List<WorkoutExerciseWithSets> {
-    return groupBy(PreparedWorkoutSessionSet::exerciseId)
-        .map { (exerciseId, sets) ->
-            WorkoutExerciseWithSets(
-                exerciseId = exerciseId,
-                sets = sets.sortedBy(PreparedWorkoutSessionSet::setNumber)
-            )
-        }
-}
-
-fun List<WorkoutSessionSetEntity>.groupWorkoutSessionEntitiesByExercise(): List<WorkoutExerciseWithPersistedSets> {
-    return groupBy(WorkoutSessionSetEntity::exerciseId)
-        .map { (exerciseId, sets) ->
-            WorkoutExerciseWithPersistedSets(
-                exerciseId = exerciseId,
-                sets = sets.sortedBy(WorkoutSessionSetEntity::setNumber)
-            )
-        }
-}

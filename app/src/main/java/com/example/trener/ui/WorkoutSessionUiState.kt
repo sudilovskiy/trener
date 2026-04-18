@@ -130,7 +130,7 @@ class WorkoutSessionUiState : ViewModel() {
     }
 
     fun getEnteredSetsForDay(trainingDay: Int): List<PreparedWorkoutSessionSet> {
-        return getExercisesForDay(trainingDay)
+        return getExercisesForWorkout(trainingDay)
             .flatMap { definition ->
                 val completedSets = completedSetNumbers[definition.exerciseId].orEmpty()
                 exerciseSets[definition.exerciseId]
@@ -151,8 +151,22 @@ class WorkoutSessionUiState : ViewModel() {
 
     fun isExerciseInActiveWorkout(exerciseId: String): Boolean {
         val currentWorkout = activeWorkout ?: return false
-        return getExercisesForDay(currentWorkout.trainingDay)
+        return currentWorkout.exerciseDefinitions
             .any { definition -> definition.exerciseId == exerciseId }
+    }
+
+    fun getActiveExerciseDefinition(exerciseId: String): WorkoutProgramExerciseDefinition? {
+        return activeWorkout?.exerciseDefinitions
+            ?.firstOrNull { definition -> definition.exerciseId == exerciseId }
+    }
+
+    fun getExercisesForWorkout(trainingDay: Int): List<WorkoutProgramExerciseDefinition> {
+        val currentWorkout = activeWorkout
+        return if (currentWorkout?.trainingDay == trainingDay) {
+            currentWorkout.exerciseDefinitions
+        } else {
+            getExercisesForDay(trainingDay)
+        }
     }
 
     fun getRequiredSetCount(@Suppress("UNUSED_PARAMETER") exerciseId: String): Int {
@@ -167,11 +181,6 @@ class WorkoutSessionUiState : ViewModel() {
     }
 
     fun isRepBasedExerciseCompleted(exerciseId: String): Boolean {
-        val definition = getExerciseDefinition(exerciseId) ?: return false
-        if (definition.inputType != ExerciseInputType.REPS) {
-            return false
-        }
-
         return isExerciseCompleted(
             exerciseId = exerciseId,
             setCount = getRequiredSetCount(exerciseId)
@@ -186,7 +195,7 @@ class WorkoutSessionUiState : ViewModel() {
 
     fun areAllExercisesCompleted(): Boolean {
         val currentWorkout = activeWorkout ?: return false
-        return getExercisesForDay(currentWorkout.trainingDay)
+        return currentWorkout.exerciseDefinitions
             .all { definition ->
                 isExerciseCompleted(
                     exerciseId = definition.exerciseId,
@@ -195,12 +204,32 @@ class WorkoutSessionUiState : ViewModel() {
             }
     }
 
-    fun startWorkout(sessionId: Long, trainingDay: Int, startedAtMillis: Long) {
-        clearDay(trainingDay)
+    fun hasMeaningfulCompletedWorkoutSet(): Boolean {
+        val currentWorkout = activeWorkout ?: return false
+        return currentWorkout.exerciseDefinitions.any { definition ->
+            val completedSets = completedSetNumbers[definition.exerciseId].orEmpty()
+            exerciseSets[definition.exerciseId]
+                .orEmpty()
+                .any { set ->
+                    set.setNumber in completedSets && set.hasMeaningfulTrackedValues()
+                }
+        }
+    }
+
+    fun startWorkout(
+        sessionId: Long,
+        trainingDay: Int,
+        dayName: String,
+        exerciseDefinitions: List<WorkoutProgramExerciseDefinition>,
+        startedAtMillis: Long
+    ) {
+        clearExerciseIds(exerciseDefinitions.map(WorkoutProgramExerciseDefinition::exerciseId))
         activeWorkout = ActiveWorkoutState(
             sessionId = sessionId,
             trainingDay = trainingDay,
-            startedAtMillis = startedAtMillis
+            startedAtMillis = startedAtMillis,
+            dayName = dayName,
+            exerciseDefinitions = exerciseDefinitions
         )
         pendingFinishTrigger = null
         isSaving = false
@@ -235,9 +264,11 @@ class WorkoutSessionUiState : ViewModel() {
     }
 
     fun completeWorkoutSaveSuccessfully() {
-        val trainingDay = activeWorkout?.trainingDay
-        if (trainingDay != null) {
-            clearDay(trainingDay)
+        val exerciseIds = activeWorkout?.exerciseDefinitions
+            ?.map(WorkoutProgramExerciseDefinition::exerciseId)
+            .orEmpty()
+        if (exerciseIds.isNotEmpty()) {
+            clearExerciseIds(exerciseIds)
         }
         activeWorkout = null
         pendingFinishTrigger = null
@@ -264,10 +295,10 @@ class WorkoutSessionUiState : ViewModel() {
         lastSaveResult = null
     }
 
-    fun clearDay(trainingDay: Int) {
-        getExercisesForDay(trainingDay).forEach { definition ->
-            exerciseSets.remove(definition.exerciseId)
-            completedSetNumbers.remove(definition.exerciseId)
+    private fun clearExerciseIds(exerciseIds: List<String>) {
+        exerciseIds.forEach { exerciseId ->
+            exerciseSets.remove(exerciseId)
+            completedSetNumbers.remove(exerciseId)
         }
     }
 
@@ -292,7 +323,9 @@ class WorkoutSessionUiState : ViewModel() {
 data class ActiveWorkoutState(
     val sessionId: Long,
     val trainingDay: Int,
-    val startedAtMillis: Long
+    val startedAtMillis: Long,
+    val dayName: String,
+    val exerciseDefinitions: List<WorkoutProgramExerciseDefinition>
 )
 
 data class ActiveWorkoutFinishRequest(
@@ -318,11 +351,20 @@ fun PreparedWorkoutSessionSet.hasEnteredValues(): Boolean {
     return hasTrackedValue(this)
 }
 
+fun PreparedWorkoutSessionSet.hasMeaningfulTrackedValues(): Boolean {
+    return (reps ?: 0) > 0 ||
+        (weight ?: 0.0) > 0.0 ||
+        (additionalValue ?: 0.0) > 0.0 ||
+        (parameterValue ?: 0.0) > 0.0 ||
+        (parameterOverrideValue ?: 0.0) > 0.0
+}
+
 private fun hasTrackedValue(set: PreparedWorkoutSessionSet): Boolean {
-    return when (getExerciseDefinition(set.exerciseId)?.inputType ?: ExerciseInputType.REPS) {
-        ExerciseInputType.REPS -> set.reps != null
-        ExerciseInputType.TIME_SECONDS -> set.additionalValue != null
-    }
+    return set.reps != null ||
+        set.weight != null ||
+        set.additionalValue != null ||
+        set.parameterValue != null ||
+        set.parameterOverrideValue != null
 }
 
 private fun hasDraftContent(set: PreparedWorkoutSessionSet): Boolean {

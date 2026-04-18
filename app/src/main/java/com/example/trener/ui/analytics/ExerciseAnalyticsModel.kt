@@ -37,8 +37,8 @@ data class ExerciseProgressAxisTick(
     val step: Double
 )
 
-fun getAllExercises(): List<ExerciseDefinition> {
-    return exerciseDefinitionsByDay.values.flatten()
+fun getAllExercises(): List<WorkoutProgramExerciseDefinition> {
+    return getWorkoutProgramDays().flatMap { day -> day.exercises }
 }
 
 fun ExerciseProgressRangeMode.displayLabel(context: Context): String {

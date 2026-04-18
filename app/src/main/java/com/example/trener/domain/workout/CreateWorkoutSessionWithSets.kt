@@ -2,7 +2,6 @@ package com.example.trener.domain.workout
 
 import com.example.trener.data.local.TrenerDatabase
 import com.example.trener.data.local.entity.WorkoutSessionEntity
-import com.example.trener.data.local.entity.WorkoutSessionSetEntity
 
 class CreateWorkoutSessionWithSets(
     private val database: TrenerDatabase
@@ -25,16 +24,7 @@ class CreateWorkoutSessionWithSets(
             )
 
             val sessionSets = sets.map { set ->
-                WorkoutSessionSetEntity(
-                    workoutSessionId = sessionId,
-                    exerciseId = set.exerciseId,
-                    setNumber = set.setNumber,
-                    reps = set.reps,
-                    weight = set.weight,
-                    additionalValue = set.additionalValue,
-                    flag = set.flag,
-                    note = set.note
-                )
+                set.toWorkoutSessionSetEntity(sessionId)
             }
 
             database.workoutSessionSetDao().insertWorkoutSessionSets(sessionSets)
